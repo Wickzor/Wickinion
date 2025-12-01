@@ -131,6 +131,19 @@ export default function App() {
   const clientConnectionRef = useRef<DataConnection | null>(null);
   const processingRef = useRef<boolean>(false); 
 
+  // --- STATE REF (Crucial for PeerJS callbacks to see latest state) ---
+  const gameStateRef = useRef({
+      players, supply, currentPlayerIndex, turnCount, log, gameMode, myPlayerId, turnPhase, trash, actionMultiplier: 1
+  });
+  
+  // Sync Ref with State
+  useEffect(() => {
+      gameStateRef.current = {
+          players, supply, currentPlayerIndex, turnCount, log, gameMode, myPlayerId, turnPhase, trash, actionMultiplier: gameStateRef.current.actionMultiplier
+      };
+  }, [players, supply, currentPlayerIndex, turnCount, log, gameMode, myPlayerId, turnPhase, trash]);
+
+
   // UI State
   const [isDiscardOpen, setIsDiscardOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
@@ -152,6 +165,11 @@ export default function App() {
   // Logic State
   const [actionMultiplier, setActionMultiplier] = useState<number>(1); 
   
+  // Sync local multiplier to ref
+  useEffect(() => {
+      gameStateRef.current.actionMultiplier = actionMultiplier;
+  }, [actionMultiplier]);
+
   // Audio
   const [isMuted, setIsMuted] = useState(false);
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
@@ -164,7 +182,6 @@ export default function App() {
   const activePlayerIndex = currentInteraction?.targetPlayerIndex ?? currentPlayerIndex;
   const activePlayer = players[activePlayerIndex];
   const isMyTurn = gameMode === 'LOCAL' || (myPlayerId === activePlayerIndex);
-  const hasActionsInHand = activePlayer?.hand.some(c => c.type === CardType.ACTION || c.type === CardType.REACTION);
   
   // Strict Phase Display
   const currentPhaseLabel = turnPhase === 'ACTION' ? 'ACTION PHASE' : 'BUY PHASE';
@@ -184,14 +201,9 @@ export default function App() {
     audioRefs.current.fireplace.loop = true;
     audioRefs.current.fireplace.volume = 0.4;
     
-    // Preload FX
-    // We try to load them, but browser might lazy load
     const loadAudio = (audio: HTMLAudioElement) => {
         audio.load();
-        // Mute initially to allow autoplay policy to pass sometimes (trick)
-        // but we rely on user interaction later.
     };
-    
     Object.values(audioRefs.current).forEach(loadAudio);
 
     const preloadImages = async (srcs: string[], onProgress: (progress: number) => void) => {
@@ -209,7 +221,7 @@ export default function App() {
                 };
                 img.onerror = () => {
                     loaded++;
-                    onProgress((loaded / total) * 100); // Proceed even on error
+                    onProgress((loaded / total) * 100);
                     resolve();
                 };
             });
@@ -217,7 +229,6 @@ export default function App() {
         await Promise.all(promises);
     };
 
-    // 2. Preload Assets & Run Loading Bar
     const bootGame = async () => {
         const loadingTips = [
             "Shuffling the King's deck...",
@@ -227,39 +238,24 @@ export default function App() {
             "Consulting the archives...",
             "Preparing the throne room...",
         ];
-        
-        // Cycle tips
         const textInterval = setInterval(() => {
             setLoadingText(loadingTips[Math.floor(Math.random() * loadingTips.length)]);
         }, 1500);
 
-        // --- REAL ASSET LOADING ---
-        // Collect all card images + some UI assets
         const cardImages = Object.values(CARDS).map(c => c.image);
-        // Preload the specific background assets (local paths)
-        const uiAssets = [
-          './booting.png',
-          './startmenu.png'
-        ];
+        const uiAssets = ['./booting.png', './startmenu.png'];
         const allAssets = [...cardImages, ...uiAssets];
 
-        // We want the loading screen to be visible for at least 4 seconds for "premium feel"
         const minTimePromise = new Promise(resolve => setTimeout(resolve, 4000));
-        
-        // Track real loading progress
         const assetPromise = preloadImages(allAssets, (pct) => {
-            // We scale the asset loading to 0-90%, keeping 10% for the final "Ready" state
             setLoadingProgress(Math.min(90, pct));
         });
 
-        // Wait for both
         await Promise.all([minTimePromise, assetPromise]);
 
         clearInterval(textInterval);
         setLoadingProgress(100);
         setLoadingText("Enter the Realm");
-        
-        // Small delay at 100%
         setTimeout(() => {
             setIsLoading(false);
         }, 800);
@@ -278,7 +274,6 @@ export default function App() {
     };
   }, []);
 
-  // Full Screen Logic
   useEffect(() => {
       const handleFullScreenChange = () => {
           setIsFullScreen(!!document.fullscreenElement);
@@ -301,42 +296,34 @@ export default function App() {
       }
   };
 
-  // Audio Playback with Physics (Pitch/Volume Variance)
   const playSfx = (name: 'flip' | 'shuffle' | 'buy') => {
     if (isMuted || !audioRefs.current[name]) return;
     const original = audioRefs.current[name];
     if (!original) return;
-    
-    // Attempt to clone for polyphony, fallback to original if clone fails
     try {
         const clone = original.cloneNode() as HTMLAudioElement;
-        // Physics: Randomize pitch (playbackRate) and volume slightly to simulate organic variance
         clone.playbackRate = 0.95 + Math.random() * 0.1;
         clone.volume = Math.min(1, (original.volume * 0.8) + (Math.random() * 0.2));
         clone.play().catch(e => console.log('SFX play failed (likely autoplay policy):', e));
     } catch (e) {
-        // Fallback
         original.currentTime = 0;
         original.play().catch(() => {});
     }
   };
 
-  // Ensure music plays when game starts
   useEffect(() => {
     const { music, fireplace } = audioRefs.current;
     if (!music || !fireplace) return;
 
     if (hasStarted && !isMuted) {
-        // Try playing. If blocked, we rely on the next user interaction.
-        const p1 = music.play().catch(e => console.log("Music autoplay blocked, waiting for interaction"));
-        const p2 = fireplace.play().catch(e => console.log("Ambience autoplay blocked"));
+        music.play().catch(e => console.log("Music autoplay blocked, waiting for interaction"));
+        fireplace.play().catch(e => console.log("Ambience autoplay blocked"));
     } else {
         music.pause();
         fireplace.pause();
     }
   }, [isMuted, hasStarted]);
 
-  // Unlock audio on first interaction if blocked
   const unlockAudio = () => {
       if (audioRefs.current.music && audioRefs.current.music.paused && !isMuted && hasStarted) {
           audioRefs.current.music.play().catch(() => {});
@@ -372,7 +359,6 @@ export default function App() {
   // --- Networking Logic ---
 
   const initHost = () => {
-    // Unlock Audio Context on Host Start
     unlockAudio();
     const peer = new Peer();
     peerRef.current = peer;
@@ -387,7 +373,6 @@ export default function App() {
 
   const joinGame = () => {
       if (!hostIdInput || isConnecting) return;
-      // Unlock Audio Context on Client Join
       unlockAudio();
       setIsConnecting(true);
       const peer = new Peer();
@@ -397,7 +382,6 @@ export default function App() {
           clientConnectionRef.current = conn;
           setLobbyStatus('Connecting to realm...');
           
-          // Timeout to reset state if connection fails silently
           const connectionTimeout = setTimeout(() => {
               if (lobbyStatus !== 'Connected! Awaiting host...') {
                  setIsConnecting(false);
@@ -423,7 +407,6 @@ export default function App() {
       });
   };
 
-  // Dedicated sender for Host to push latest state
   const sendFullStateUpdate = (p: Player[] = players, s: Record<string, number> = supply, t: number = turnCount, cIdx: number = currentPlayerIndex, l: string[] = log) => {
       if (gameMode !== 'ONLINE_HOST') return;
       const payload = { players: p, supply: s, turnCount: t, currentPlayerIndex: cIdx, log: l };
@@ -435,7 +418,10 @@ export default function App() {
       clientConnectionRef.current.send({ type: 'ACTION', payload: { ...payload, playerIndex: myPlayerId } });
   };
 
+  // FIXED: Handle message uses stateRef to avoid stale closures
   const handleNetworkMessage = (msg: NetworkMessage) => {
+      const state = gameStateRef.current; // ALWAYS use latest state for logic decisions
+
       if (msg.type === 'STATE_UPDATE') {
           const { players: p, supply: s, turnCount: t, currentPlayerIndex: c, log: l } = msg.payload;
           setPlayers(p); setSupply(s); setTurnCount(t); setCurrentPlayerIndex(c); setLog(l);
@@ -449,10 +435,17 @@ export default function App() {
           setIsConnecting(false);
       }
       else if (msg.type === 'ACTION') {
-          if (gameMode !== 'ONLINE_HOST') return;
+          // This block runs on HOST
+          if (state.gameMode !== 'ONLINE_HOST') return;
           const { actionType, playerIndex, cardIndex, cardId } = msg.payload;
-          if (playerIndex !== currentPlayerIndex) return; // Basic turn validation on host
+          
+          // Validation against live state
+          if (playerIndex !== state.currentPlayerIndex) {
+              console.warn(`Ignored action from player ${playerIndex} (Current Turn: ${state.currentPlayerIndex})`);
+              return; 
+          }
 
+          // Use the execute functions which now read from ref to ensure atomic updates
           if (actionType === 'PLAY_CARD' && typeof cardIndex === 'number') executePlayCard(playerIndex, cardIndex);
           else if (actionType === 'BUY_CARD' && cardId) executeBuyCard(playerIndex, cardId);
           else if (actionType === 'PLAY_ALL_TREASURES') executePlayAllTreasures(playerIndex);
@@ -462,7 +455,6 @@ export default function App() {
 
   // --- Reset & Exit Logic ---
   const exitGame = () => {
-    // 1. Clear Game State
     setHasStarted(false);
     setGameOver(false);
     setPlayers([]);
@@ -476,14 +468,11 @@ export default function App() {
     setCurrentPlayerIndex(0);
     setTurnPhase('ACTION');
     setConfirmingCardIndex(null);
-    
-    // 2. Clear UI State
     setIsDiscardOpen(false);
     setIsTrashOpen(false);
     setIsLogOpen(false);
     setGameMenuOpen(false);
     
-    // 3. Close & Reset Networking
     if (peerRef.current) {
         peerRef.current.destroy();
         peerRef.current = null;
@@ -503,13 +492,9 @@ export default function App() {
   // --- Game Mechanics ---
 
   const checkGameOver = (currentSupply: Record<string, number>) => {
-    // Original condition: Province empty OR 3 piles empty
-    // New condition: ANY Lands & Titles (Province, Duchy, Estate) empty OR 3 piles empty
-    
     if ((currentSupply['province'] ?? 0) <= 0) return true;
     if ((currentSupply['duchy'] ?? 0) <= 0) return true;
     if ((currentSupply['estate'] ?? 0) <= 0) return true;
-    
     const emptyPiles = Object.values(currentSupply).filter(count => count <= 0).length;
     return emptyPiles >= 3;
   };
@@ -534,9 +519,7 @@ export default function App() {
   }, []);
 
   const initGame = (boardId: string, playerCount: number) => {
-      // Audio Init on Start
       if (!isMuted) { 
-          // Explicitly play to unlock audio context on button click
           audioRefs.current.music?.play().catch(()=>{});
           playSfx('shuffle');
       }
@@ -573,6 +556,9 @@ export default function App() {
       setViewingSupplyCard(null);
       setConfirmingCardIndex(null);
 
+      // Force update ref immediately for network calls
+      gameStateRef.current = { ...gameStateRef.current, players: newPlayers, supply: newSupply, currentPlayerIndex: 0 };
+
       if (gameMode === 'ONLINE_HOST') {
           hostConnectionsRef.current.forEach((conn, idx) => conn.send({ type: 'START_GAME', payload: { yourPlayerId: idx + 1 } }));
           setTimeout(() => sendFullStateUpdate(newPlayers, newSupply, 1, 0, newLog), 100);
@@ -583,13 +569,10 @@ export default function App() {
   // --- Handlers (UI triggers) ---
 
   const handleHandCardClick = (index: number) => {
-      // Unlock audio on interaction
       unlockAudio();
 
-      // 1. Interaction Mode: Toggle Selection
       if (currentInteraction) {
           if (currentInteraction.type === 'HAND_SELECTION' || currentInteraction.type === 'CUSTOM_SELECTION') {
-               // Check if index matches target player (Sanity check)
                 if (activePlayerIndex !== (gameMode === 'LOCAL' ? activePlayerIndex : myPlayerId)) return;
 
                 const isSelected = selectedHandIndices.includes(index);
@@ -600,14 +583,11 @@ export default function App() {
                         ? currentInteraction.customCards[index]
                         : activePlayer.hand[index];
                         
-                    // Check filters
                     if (currentInteraction.filter && !currentInteraction.filter(card)) {
                         triggerShake(`${index}-${card.id}`);
                         return;
                     }
-                    // Check Max limit
                     if (currentInteraction.max !== -1 && selectedHandIndices.length >= currentInteraction.max) {
-                        // If single select, swap selection
                         if (currentInteraction.max === 1) {
                             setSelectedHandIndices([index]);
                         } else {
@@ -621,7 +601,6 @@ export default function App() {
           return;
       }
 
-      // 2. Play Mode
       if (processingRef.current) return;
       processingRef.current = true;
       setTimeout(() => { processingRef.current = false }, 300);
@@ -629,7 +608,6 @@ export default function App() {
       const card = currentPlayer.hand[index];
       const isAction = card.type === CardType.ACTION || card.type === CardType.REACTION;
       
-      // PHASE CHECK: Strictly enforce Action vs Buy phase
       if (isAction) {
           if (turnPhase === 'BUY') {
               addLog("❌ Cannot play Actions during Buy Phase.");
@@ -643,12 +621,10 @@ export default function App() {
               return;
           }
           
-          // CONFIRMATION CHECK FOR ACTIONS
           if (confirmingCardIndex !== index) {
               setConfirmingCardIndex(index);
-              return; // Stop here, wait for second click
+              return; 
           }
-          // If we reach here, user clicked the same action card twice (Confirmed)
           setConfirmingCardIndex(null); 
       }
 
@@ -660,7 +636,6 @@ export default function App() {
   };
 
   const handleSupplyCardClick = (cardId: string) => {
-      // 1. Interaction Mode: Gain from Supply
       if (currentInteraction && currentInteraction.type === 'SUPPLY_SELECTION') {
           const card = CARDS[cardId];
           if (currentInteraction.filter && !currentInteraction.filter(card)) {
@@ -671,15 +646,11 @@ export default function App() {
                addFloatingText("Empty Pile", "text-red-500");
                return;
            }
-          
-          // Execute Resolution
           currentInteraction.onResolve([card], []);
-          // Remove current interaction
           setInteractionQueue(prev => prev.slice(1));
           return;
       }
 
-      // 2. Buy Phase - OPEN MODAL instead of buying immediately
       const card = CARDS[cardId];
       if (card) {
           setViewingSupplyCard(card);
@@ -689,7 +660,6 @@ export default function App() {
   const confirmBuyCard = () => {
       if (!viewingSupplyCard) return;
       
-      // Basic Local Checks logic moved here for immediate feedback, actual execution does real check
       if (processingRef.current) return;
       processingRef.current = true;
       setTimeout(() => { processingRef.current = false }, 300);
@@ -701,7 +671,7 @@ export default function App() {
       } else {
           executeBuyCard(currentPlayerIndex, cardId);
       }
-      setViewingSupplyCard(null); // Close modal
+      setViewingSupplyCard(null); 
   };
 
   const handleConfirmInteraction = () => {
@@ -712,8 +682,6 @@ export default function App() {
           return;
       }
 
-      // Resolve
-      // For CUSTOM_SELECTION, map indices to the customCards array
       let selectedCards: CardDef[] = [];
       if (currentInteraction.type === 'CUSTOM_SELECTION' && currentInteraction.customCards) {
           selectedCards = selectedHandIndices.map(i => currentInteraction.customCards![i]);
@@ -722,8 +690,6 @@ export default function App() {
       }
       
       currentInteraction.onResolve(selectedCards, selectedHandIndices);
-      
-      // Clear selection and pop queue
       setSelectedHandIndices([]);
       setInteractionQueue(prev => prev.slice(1));
   };
@@ -761,48 +727,47 @@ export default function App() {
       }
   };
 
-  // --- Execution Logic ---
+  // --- Execution Logic (Updated to use REF for latest state) ---
 
   function executePlayCard(playerIdx: number, cardIdx: number) {
-      const player = players[playerIdx];
+      // NOTE: We fetch current state from REF, ensuring we are not using stale closures from when network listeners were bound
+      const currentState = gameStateRef.current;
+      const playersList = currentState.players;
+      const player = playersList[playerIdx];
+      if (!player) return;
       const card = player.hand[cardIdx];
       if (!card) return;
 
       const isAction = card.type === CardType.ACTION || card.type === CardType.REACTION;
       
-      if (isAction && turnPhase === 'BUY') return; // Strict phase check
-      if (isAction && player.actions <= 0 && actionMultiplier === 1) return;
+      if (isAction && currentState.turnPhase === 'BUY') return; 
+      if (isAction && player.actions <= 0 && currentState.actionMultiplier === 1) return;
 
-      if (gameMode === 'LOCAL' || gameMode === 'ONLINE_HOST') playSfx('flip');
+      if (currentState.gameMode === 'LOCAL' || currentState.gameMode === 'ONLINE_HOST') playSfx('flip');
 
-      // State Transition: Playing a Treasure automatically starts Buy Phase
-      if (card.type === CardType.TREASURE && turnPhase === 'ACTION') {
+      if (card.type === CardType.TREASURE && currentState.turnPhase === 'ACTION') {
           setTurnPhase('BUY');
       }
 
-      // Move card from hand to play area
       const newHand = [...player.hand];
       newHand.splice(cardIdx, 1);
       const newPlayArea = [...player.playArea, card];
       
       let newActions = player.actions;
-      if (isAction && actionMultiplier === 1) newActions -= 1;
+      if (isAction && currentState.actionMultiplier === 1) newActions -= 1;
 
-      // Base Stats Update
       let newBuys = player.buys;
       let newGold = player.gold;
       let newDeck = player.deck;
       let newDiscard = player.discard;
       let drawnHand = newHand; 
-      const newLog = [...log];
+      const newLog = [...currentState.log];
 
-      // --- Helper to queue interaction for current player ---
       const queueInteraction = (interaction: Interaction) => {
           setInteractionQueue(prev => [...prev, interaction]);
       };
 
-      // Execute Immediate Stats
-      const timesToPlay = (isAction) ? actionMultiplier : 1;
+      const timesToPlay = (isAction) ? currentState.actionMultiplier : 1;
       
       for(let i=0; i<timesToPlay; i++) {
           newLog.push(`${player.name} plays ${card.name} ${i > 0 ? '(Second Cast)' : ''}`);
@@ -817,13 +782,11 @@ export default function App() {
                  newDeck = res.newDeck;
                  newDiscard = res.newDiscard;
                  drawnHand = res.newHand;
-                 if (res.didShuffle && (gameMode === 'LOCAL' || gameMode === 'ONLINE_HOST')) playSfx('shuffle');
+                 if (res.didShuffle && (currentState.gameMode === 'LOCAL' || currentState.gameMode === 'ONLINE_HOST')) playSfx('shuffle');
               }
           } else if (card.type === CardType.TREASURE) {
               newGold += (card.value || 0);
           }
-
-          // --- Complex Card Logic (Queue Interactions) ---
           
           if (card.id === 'cellar') {
               queueInteraction({
@@ -868,15 +831,11 @@ export default function App() {
           }
 
           if (card.id === 'sentry') {
-              // 1. Draw 2 cards (virtually) to see them
-              // Note: We use drawCards logic but keep them in a separate buffer first
               const { newDeck: tempDeck, newDiscard: tempDiscard, newHand: drawn } = drawCards(2, newDeck, newDiscard, []);
               newDeck = tempDeck; 
               newDiscard = tempDiscard;
               
-              // Only proceed if we actually drew something
               if (drawn.length > 0) {
-                  // Phase 1: Trash
                   queueInteraction({
                       id: `sentry-trash-${Date.now()}-${i}`,
                       type: 'CUSTOM_SELECTION',
@@ -891,7 +850,6 @@ export default function App() {
                           if (trashed.length > 0) addLog(`${player.name} trashed ${trashed.length} cards with Sentry.`);
                           
                           if (keptAfterTrash.length > 0) {
-                              // Phase 2: Discard
                               queueInteraction({
                                   id: `sentry-discard-${Date.now()}-${i}`,
                                   type: 'CUSTOM_SELECTION',
@@ -905,8 +863,6 @@ export default function App() {
                                       
                                       setPlayers(prevPlayers => {
                                           const p = prevPlayers[playerIdx];
-                                          // Update deck with kept cards (put back on top)
-                                          // In a real game you order them. Here we just push them back.
                                           return prevPlayers.map((pl, idx) => idx === playerIdx ? { 
                                               ...pl, 
                                               discard: [...pl.discard, ...discarded],
@@ -924,15 +880,9 @@ export default function App() {
           }
 
           if (card.id === 'library') {
-               // Simplification: Draw until 7 cards. If Action is drawn, set aside.
-               // Since interactive "Set Aside" loop is complex in this architecture,
-               // we will implement: Draw until 7.
                const currentHandSize = drawnHand.length;
                const needed = 7 - currentHandSize;
                if (needed > 0) {
-                   // We actually just run the draw. 
-                   // Advanced logic: To strictly follow rules, we'd need a recursive interaction queue.
-                   // For this version: Auto-draw to 7.
                    const res = drawCards(needed, newDeck, newDiscard, drawnHand);
                    newDeck = res.newDeck;
                    newDiscard = res.newDiscard;
@@ -947,16 +897,14 @@ export default function App() {
                       id: `harbinger-${Date.now()}-${i}`,
                       type: 'CUSTOM_SELECTION',
                       source: 'Harbinger',
-                      customCards: newDiscard, // Select from discard
+                      customCards: newDiscard, 
                       min: 1, max: 1,
                       targetPlayerIndex: playerIdx,
                       confirmLabel: 'Topdeck',
                       onResolve: (selected, indices) => {
                           const selectedCard = selected[0];
-                          // Remove from discard, add to deck
                           setPlayers(prevPlayers => {
                               const p = prevPlayers[playerIdx];
-                              // Find index in actual discard to remove (first match)
                               const realDiscard = [...p.discard];
                               const removeIdx = realDiscard.findIndex(c => c.id === selectedCard.id);
                               if (removeIdx > -1) realDiscard.splice(removeIdx, 1);
@@ -974,16 +922,12 @@ export default function App() {
           }
 
           if (card.id === 'vassal') {
-             // 1. Discard top card
              const res = drawCards(1, newDeck, newDiscard, []);
              if (res.newHand.length > 0) {
                  const revealed = res.newHand[0];
                  newDeck = res.newDeck;
-                 newDiscard = res.newDiscard; // Deck shuffled if needed
+                 newDiscard = res.newDiscard;
                  
-                 // Add to discard immediately? Or wait? 
-                 // Rules: Discard it. If action, you may play it.
-                 // We put it in discard for state consistency, but track it.
                  newDiscard = [...newDiscard, revealed];
                  newLog.push(`${player.name} Vassal reveals: ${revealed.name}`);
 
@@ -997,25 +941,17 @@ export default function App() {
                          confirmLabel: 'Play It',
                          filterMessage: `Play ${revealed.name} from discard?`,
                          onResolve: () => {
-                             // User chose to play it.
-                             // Remove from discard, put in play area, execute it.
-                             // We need to trigger executePlayCard recursively *but* carefully.
-                             // Since executePlayCard expects card in HAND, we cheat:
-                             // Add to hand, then auto-play? Or make executePlayCard handle generic source?
-                             // Simplest: Add to hand, call executePlayCard immediately.
                              setPlayers(prevPlayers => {
                                  const p = prevPlayers[playerIdx];
                                  const disc = [...p.discard];
-                                 disc.pop(); // Remove the vassal'd card
+                                 disc.pop(); 
                                  return prevPlayers.map((pl, idx) => idx === playerIdx ? { 
                                      ...pl, 
                                      discard: disc,
                                      hand: [...pl.hand, revealed] 
                                  } : pl);
                              });
-                             // Use timeout to let state settle then trigger play
                              setTimeout(() => {
-                                 // Finding the index of the card we just added (last one)
                                  setPlayers(current => {
                                      const p = current[playerIdx];
                                      executePlayCard(playerIdx, p.hand.length - 1);
@@ -1185,7 +1121,7 @@ export default function App() {
           }
           
           if (card.id === 'poacher') {
-               const emptyPiles = Object.values(supply).filter(v => v === 0).length;
+               const emptyPiles = Object.values(currentState.supply).filter(v => v === 0).length;
                if (emptyPiles > 0) {
                    const discardCount = Math.min(emptyPiles, drawnHand.length);
                    queueInteraction({
@@ -1209,7 +1145,7 @@ export default function App() {
           }
 
           if (card.id === 'militia') {
-              players.forEach((p, pIdx) => {
+              playersList.forEach((p, pIdx) => {
                   if (pIdx === playerIdx) return;
                   if (p.hand.length <= 3) return; 
                   if (p.hand.some(c => c.id === 'moat')) {
@@ -1239,29 +1175,19 @@ export default function App() {
           }
 
           if (card.id === 'bandit') {
-               // Attack part
-               players.forEach((p, pIdx) => {
+               playersList.forEach((p, pIdx) => {
                    if (pIdx === playerIdx) return;
                    if (p.hand.some(c => c.id === 'moat')) {
                        newLog.push(`${p.name} blocks Bandit with Moat.`);
                        return;
                    }
                    
-                   // Reveal top 2
-                   // We need to access the LATEST player state inside the loop, 
-                   // but standard variables are stale. We must rely on functional state updates carefully
-                   // or snapshot the data.
-                   // NOTE: For simplicity in this engine, we assume the 'p' from the closure is "fresh enough" 
-                   // or we use a functional update chain.
-                   
-                   // Actually, we must interact with the deck.
-                   // Let's queue an interaction that auto-resolves or requires confirmation to proceed.
                    queueInteraction({
                        id: `bandit-${p.name}-${Date.now()}`,
                        type: 'CONFIRMATION',
                        source: `Bandit Attack (${p.name})`,
                        min: 0, max: 0,
-                       targetPlayerIndex: pIdx, // Victim sees this
+                       targetPlayerIndex: pIdx, 
                        confirmLabel: 'Reveal Cards',
                        filterMessage: `${player.name} plays Bandit. Reveal top 2 cards?`,
                        onResolve: () => {
@@ -1269,7 +1195,6 @@ export default function App() {
                                const victim = prevPlayers[pIdx];
                                const { newDeck: vDeck, newDiscard: vDiscard, newHand: revealed } = drawCards(2, victim.deck, victim.discard, []);
                                
-                               // Find treasure to trash
                                const treasureToTrash = revealed.find(c => c.type === CardType.TREASURE && c.id !== 'copper');
                                const kept = revealed.filter(c => c !== treasureToTrash);
                                
@@ -1292,9 +1217,8 @@ export default function App() {
           }
 
           if (card.id === 'council_room') {
-               players.forEach((p, pIdx) => {
+               playersList.forEach((p, pIdx) => {
                    if (pIdx === playerIdx) return;
-                   // Others draw 1 card
                    setPlayers(prevPlayers => {
                        const other = prevPlayers[pIdx];
                        const { newDeck: d, newDiscard: disc, newHand: h } = drawCards(1, other.deck, other.discard, other.hand);
@@ -1306,21 +1230,18 @@ export default function App() {
           
           if (card.id === 'bureaucrat') {
                const silver = CARDS['silver'];
-               if (supply['silver'] > 0) {
+               if (currentState.supply['silver'] > 0) {
                    setSupply(prev => ({ ...prev, silver: prev.silver - 1 }));
                    newDeck = [...newDeck, silver];
                    addLog(`${player.name} put a Silver on their deck.`);
                }
-               // Bureaucrat Attack: Each other player puts a Victory card from hand onto deck
-               players.forEach((p, pIdx) => {
+               playersList.forEach((p, pIdx) => {
                    if (pIdx === playerIdx) return;
                    if (p.hand.some(c => c.id === 'moat')) {
                        newLog.push(`${p.name} blocks Bureaucrat with Moat.`);
                        return;
                    }
                    
-                   const victoryCards = p.hand.filter(c => c.type === CardType.VICTORY || c.type === CardType.CURSE); // Curse counts as Victory in some rules, usually separate, but standard says Victory card.
-                   // Actually Curse is not Victory.
                    const validVictory = p.hand.filter(c => c.type === CardType.VICTORY);
                    
                    if (validVictory.length > 0) {
@@ -1344,8 +1265,6 @@ export default function App() {
                            }
                        });
                    } else {
-                       // Reveal hand to show no victory cards
-                       // For simplicity, we just log it. 
                        addLog(`${p.name} shows a hand with no Victory cards.`);
                    }
                });
@@ -1359,14 +1278,12 @@ export default function App() {
           }
       }
 
-      // Update Player with stats
-      let updatedPlayers = players.map((p, i) => i === playerIdx ? {
+      let updatedPlayers = playersList.map((p, i) => i === playerIdx ? {
           ...p, hand: drawnHand, playArea: newPlayArea, actions: newActions, buys: newBuys, gold: newGold, deck: newDeck, discard: newDiscard
       } : p);
 
-      // Simple Witch Logic (Immediate)
-      if (card.id === 'witch' && supply['curse'] > 0) {
-         let cursesLeft = supply['curse'];
+      if (card.id === 'witch' && currentState.supply['curse'] > 0) {
+         let cursesLeft = currentState.supply['curse'];
          for(let i=0; i<timesToPlay; i++) {
              updatedPlayers = updatedPlayers.map((p, pIdx) => {
                  if (pIdx === playerIdx) return p;
@@ -1386,20 +1303,22 @@ export default function App() {
       }
       
       setPlayers(updatedPlayers);
-      if (gameMode === 'LOCAL') setLog(newLog);
+      if (currentState.gameMode === 'LOCAL') setLog(newLog);
 
-      if (gameMode === 'ONLINE_HOST') {
-          sendFullStateUpdate(updatedPlayers, supply, turnCount, currentPlayerIndex, newLog);
+      if (currentState.gameMode === 'ONLINE_HOST') {
+          // IMPORTANT: sendFullStateUpdate reads from stateRef? No, it accepts args.
+          // Pass the freshly calculated variables.
+          sendFullStateUpdate(updatedPlayers, currentState.supply, currentState.turnCount, currentState.currentPlayerIndex, newLog);
       }
   }
 
   function executeBuyCard(playerIdx: number, cardId: string) {
-      const player = players[playerIdx];
+      const currentState = gameStateRef.current;
+      const player = currentState.players[playerIdx];
       const card = CARDS[cardId];
       if (!card) return;
       
-      // Validation
-      if ((supply[cardId] || 0) < 1) {
+      if ((currentState.supply[cardId] || 0) < 1) {
           addLog("Cannot buy: Pile is empty.");
           return;
       }
@@ -1412,17 +1331,14 @@ export default function App() {
           return;
       }
 
-      // Lock to Buy Phase if buying
       setTurnPhase('BUY');
 
-      if (gameMode === 'LOCAL' || gameMode === 'ONLINE_HOST') playSfx('buy');
+      if (currentState.gameMode === 'LOCAL' || currentState.gameMode === 'ONLINE_HOST') playSfx('buy');
 
-      // Update Supply
-      const newSupply = { ...supply, [cardId]: supply[cardId] - 1 };
+      const newSupply = { ...currentState.supply, [cardId]: currentState.supply[cardId] - 1 };
       setSupply(newSupply);
 
-      // Update Player
-      const newPlayers = players.map((p, idx) => {
+      const newPlayers = currentState.players.map((p, idx) => {
           if (idx !== playerIdx) return p;
           return {
               ...p,
@@ -1433,11 +1349,11 @@ export default function App() {
       });
       setPlayers(newPlayers);
 
-      const newLog = [...log, `${player.name} bought ${card.name}.`];
+      const newLog = [...currentState.log, `${player.name} bought ${card.name}.`];
       setLog(newLog);
 
-      if (gameMode === 'ONLINE_HOST') {
-          sendFullStateUpdate(newPlayers, newSupply, turnCount, currentPlayerIndex, newLog);
+      if (currentState.gameMode === 'ONLINE_HOST') {
+          sendFullStateUpdate(newPlayers, newSupply, currentState.turnCount, currentState.currentPlayerIndex, newLog);
       }
 
       if (checkGameOver(newSupply)) {
@@ -1446,20 +1362,20 @@ export default function App() {
   }
 
   function executePlayAllTreasures(playerIdx: number) {
-      const player = players[playerIdx];
+      const currentState = gameStateRef.current;
+      const player = currentState.players[playerIdx];
       const treasures = player.hand.filter(c => c.type === CardType.TREASURE);
       if (treasures.length === 0) return;
 
-      // Lock to Buy Phase
       setTurnPhase('BUY');
 
-      if (gameMode === 'LOCAL' || gameMode === 'ONLINE_HOST') playSfx('buy');
+      if (currentState.gameMode === 'LOCAL' || currentState.gameMode === 'ONLINE_HOST') playSfx('buy');
 
       const totalValue = treasures.reduce((sum, c) => sum + (c.value || 0), 0);
       const newHand = player.hand.filter(c => c.type !== CardType.TREASURE);
       const newPlayArea = [...player.playArea, ...treasures];
 
-      const newPlayers = players.map((p, idx) => {
+      const newPlayers = currentState.players.map((p, idx) => {
           if (idx !== playerIdx) return p;
           return {
               ...p,
@@ -1470,19 +1386,19 @@ export default function App() {
       });
       setPlayers(newPlayers);
 
-      const newLog = [...log, `${player.name} played all treasures (+${totalValue} Gold).`];
+      const newLog = [...currentState.log, `${player.name} played all treasures (+${totalValue} Gold).`];
       setLog(newLog);
 
-      if (gameMode === 'ONLINE_HOST') {
-          sendFullStateUpdate(newPlayers, supply, turnCount, currentPlayerIndex, newLog);
+      if (currentState.gameMode === 'ONLINE_HOST') {
+          sendFullStateUpdate(newPlayers, currentState.supply, currentState.turnCount, currentState.currentPlayerIndex, newLog);
       }
   }
 
   function executeEndTurn(playerIdx: number) {
       setIsEndingTurn(true);
-      const player = players[playerIdx];
+      const currentState = gameStateRef.current;
+      const player = currentState.players[playerIdx];
 
-      // Cleanup
       const cardsToDiscard = [...player.hand, ...player.playArea];
       const newDiscard = [...player.discard, ...cardsToDiscard];
       
@@ -1499,10 +1415,10 @@ export default function App() {
           gold: 0
       };
 
-      const nextPlayerIndex = (playerIdx + 1) % players.length;
-      const nextTurnCount = nextPlayerIndex === 0 ? turnCount + 1 : turnCount;
+      const nextPlayerIndex = (playerIdx + 1) % currentState.players.length;
+      const nextTurnCount = nextPlayerIndex === 0 ? currentState.turnCount + 1 : currentState.turnCount;
       
-      const newPlayers = players.map((p, i) => i === playerIdx ? updatedPlayer : p);
+      const newPlayers = currentState.players.map((p, i) => i === playerIdx ? updatedPlayer : p);
       
       setPlayers(newPlayers);
       
@@ -1512,18 +1428,18 @@ export default function App() {
           setActionMultiplier(1);
           setInteractionQueue([]); 
           setIsEndingTurn(false);
-          setTurnPhase('ACTION'); // Reset to Action Phase for next player
-          setConfirmingCardIndex(null); // Reset action confirmations
+          setTurnPhase('ACTION'); 
+          setConfirmingCardIndex(null); 
           
-          if (gameMode === 'LOCAL') {
+          if (currentState.gameMode === 'LOCAL') {
               setIsTransitioning(true);
           }
           
-          const newLog = [...log, `${player.name} ended turn`];
+          const newLog = [...currentState.log, `${player.name} ended turn`];
           setLog(newLog);
 
-          if (gameMode === 'ONLINE_HOST') {
-              sendFullStateUpdate(newPlayers, supply, nextTurnCount, nextPlayerIndex, newLog);
+          if (currentState.gameMode === 'ONLINE_HOST') {
+              sendFullStateUpdate(newPlayers, currentState.supply, nextTurnCount, nextPlayerIndex, newLog);
           }
       }, 500);
   }
