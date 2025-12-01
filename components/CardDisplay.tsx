@@ -110,46 +110,46 @@ export const CardDisplay: React.FC<CardDisplayProps> = ({ card, onClick, onMouse
   // --- RESPONSIVE SCALING ENGINE ---
   // Increased "small" dimensions by approx 25% for better buying board visibility
   const sizeClasses = small 
-    ? 'w-20 h-32 md:w-24 md:h-40 lg:w-20 lg:h-32 xl:w-24 xl:h-40 2xl:w-52 2xl:h-80 rounded-md lg:rounded-lg' 
+    ? 'w-24 h-36 md:w-28 md:h-44 lg:w-24 lg:h-36 xl:w-28 xl:h-44 2xl:w-56 2xl:h-80 rounded-md lg:rounded-lg' 
     : 'w-24 h-36 md:w-32 md:h-48 lg:w-24 lg:h-36 xl:w-32 xl:h-48 2xl:w-72 2xl:h-[28rem] rounded-lg lg:rounded-xl'; 
 
   // Gem (Cost)
   const gemSize = small 
-    ? 'w-5 h-5 md:w-6 md:h-6 lg:w-5 lg:h-5 xl:w-6 xl:h-6 2xl:w-12 2xl:h-12 top-0.5 left-0.5 lg:top-1 lg:left-1' 
+    ? 'w-6 h-6 md:w-7 md:h-7 lg:w-6 lg:h-6 xl:w-7 xl:h-7 2xl:w-14 2xl:h-14 top-1 left-1' 
     : 'w-6 h-6 md:w-8 md:h-8 lg:w-7 lg:h-7 xl:w-8 xl:h-8 2xl:w-16 2xl:h-16 top-1 left-1 lg:top-1 lg:left-1 2xl:top-2 2xl:left-2';
   
   const gemText = small 
-    ? 'text-[8px] md:text-[10px] lg:text-[8px] xl:text-[10px] 2xl:text-xl' 
+    ? 'text-[10px] md:text-xs lg:text-[10px] xl:text-xs 2xl:text-2xl' 
     : 'text-xs md:text-sm lg:text-xs xl:text-sm 2xl:text-4xl';
 
   // Name Plaque
   const plaqueSize = small 
-    ? 'h-5 md:h-6 lg:h-5 xl:h-6 2xl:h-10 -bottom-1.5 md:-bottom-2 2xl:-bottom-3' 
+    ? 'h-6 md:h-7 lg:h-6 xl:h-7 2xl:h-12 -bottom-2 md:-bottom-2.5 2xl:-bottom-4' 
     : 'h-6 md:h-8 lg:h-7 xl:h-8 2xl:h-16 -bottom-2 lg:-bottom-2.5 2xl:-bottom-5';
   
   const titleSize = small 
-    ? 'text-[5px] md:text-[6px] lg:text-[5px] xl:text-[6px] 2xl:text-sm tracking-wide' 
+    ? 'text-[8px] md:text-[9px] lg:text-[8px] xl:text-[9px] 2xl:text-base tracking-wide' 
     : 'text-[7px] md:text-[9px] lg:text-[7px] xl:text-[9px] 2xl:text-2xl tracking-widest';
 
   // Body Content
   const bodyPadding = small 
-    ? 'pt-2 md:pt-3 lg:pt-2 2xl:pt-8 pb-0.5 px-0.5 lg:px-1' 
+    ? 'pt-3 md:pt-4 lg:pt-3 2xl:pt-10 pb-1 px-1 lg:px-1.5' 
     : 'pt-3 md:pt-4 lg:pt-3 xl:pt-4 2xl:pt-12 pb-1 px-1 lg:px-2 2xl:px-6';
   
   const descSize = small 
-    ? 'text-[4px] md:text-[5px] lg:text-[4px] xl:text-[5px] 2xl:text-xs leading-tight' 
+    ? 'text-[7px] md:text-[8px] lg:text-[7px] xl:text-[8px] 2xl:text-sm leading-tight' 
     : 'text-[6px] md:text-[8px] lg:text-[6px] xl:text-[8px] 2xl:text-xl leading-2 lg:leading-3 2xl:leading-6';
   
   const typeSize = small 
-    ? 'text-[3px] md:text-[4px] lg:text-[3px] xl:text-[4px] 2xl:text-[10px] tracking-wider mb-0.5' 
+    ? 'text-[6px] md:text-[7px] lg:text-[6px] xl:text-[7px] 2xl:text-xs tracking-wider mb-0.5' 
     : 'text-[5px] md:text-[6px] lg:text-[5px] xl:text-[6px] 2xl:text-base tracking-[0.2em] mb-0.5 lg:mb-1 2xl:mb-4';
 
   const iconWatermarkSize = small 
-    ? 'w-6 h-6 md:w-8 md:h-8 lg:w-6 lg:h-6 2xl:w-20 2xl:h-20 -bottom-1 -right-1' 
+    ? 'w-8 h-8 md:w-10 md:h-10 lg:w-8 lg:h-8 2xl:w-24 2xl:h-24 -bottom-1 -right-1' 
     : 'w-8 h-8 md:w-10 md:h-10 lg:w-8 lg:h-8 xl:w-10 xl:h-10 2xl:w-32 2xl:h-32 -bottom-1 -right-1 lg:-bottom-2 lg:-right-2';
 
   const countBadgeSize = small
-    ? 'w-4 h-4 text-[6px] md:w-5 md:h-5 md:text-[8px] lg:w-4 lg:h-4 lg:text-[6px] 2xl:w-12 2xl:h-12 2xl:text-lg border 2xl:border-4'
+    ? 'w-5 h-5 text-[8px] md:w-6 md:h-6 md:text-[10px] lg:w-5 lg:h-5 lg:text-[8px] 2xl:w-14 2xl:h-14 2xl:text-xl border lg:border-2 2xl:border-4'
     : 'w-5 h-5 text-[8px] md:w-6 md:h-6 md:text-[10px] lg:w-5 lg:h-5 lg:text-[8px] xl:w-6 xl:h-6 xl:text-[10px] 2xl:w-14 2xl:h-14 2xl:text-2xl border lg:border-2 2xl:border-4';
 
   return (
