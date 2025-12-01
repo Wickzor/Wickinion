@@ -185,9 +185,14 @@ export default function App() {
     audioRefs.current.fireplace.volume = 0.4;
     
     // Preload FX
-    audioRefs.current.flip.load();
-    audioRefs.current.buy.load();
-    audioRefs.current.shuffle.load();
+    // We try to load them, but browser might lazy load
+    const loadAudio = (audio: HTMLAudioElement) => {
+        audio.load();
+        // Mute initially to allow autoplay policy to pass sometimes (trick)
+        // but we rely on user interaction later.
+    };
+    
+    Object.values(audioRefs.current).forEach(loadAudio);
 
     const preloadImages = async (srcs: string[], onProgress: (progress: number) => void) => {
         let loaded = 0;
@@ -300,28 +305,44 @@ export default function App() {
   const playSfx = (name: 'flip' | 'shuffle' | 'buy') => {
     if (isMuted || !audioRefs.current[name]) return;
     const original = audioRefs.current[name];
+    if (!original) return;
     
-    // AAA Logic: Clone node for polyphony (so rapid sounds don't cut each other off)
-    const clone = original.cloneNode() as HTMLAudioElement;
-    
-    // Physics: Randomize pitch (playbackRate) and volume slightly to simulate organic variance
-    // 0.95 - 1.05 pitch range
-    clone.playbackRate = 0.95 + Math.random() * 0.1;
-    // 0.8 - 1.0 volume range relative to base
-    clone.volume = Math.min(1, (original.volume * 0.8) + (Math.random() * 0.2));
-    
-    clone.play().catch(() => {});
+    // Attempt to clone for polyphony, fallback to original if clone fails
+    try {
+        const clone = original.cloneNode() as HTMLAudioElement;
+        // Physics: Randomize pitch (playbackRate) and volume slightly to simulate organic variance
+        clone.playbackRate = 0.95 + Math.random() * 0.1;
+        clone.volume = Math.min(1, (original.volume * 0.8) + (Math.random() * 0.2));
+        clone.play().catch(e => console.log('SFX play failed (likely autoplay policy):', e));
+    } catch (e) {
+        // Fallback
+        original.currentTime = 0;
+        original.play().catch(() => {});
+    }
   };
 
+  // Ensure music plays when game starts
   useEffect(() => {
     const { music, fireplace } = audioRefs.current;
-    if (!music || !fireplace || !hasStarted) return;
-    if (isMuted) { music.pause(); fireplace.pause(); } 
-    else { 
-        music.play().catch(() => {}); 
-        fireplace.play().catch(() => {}); 
+    if (!music || !fireplace) return;
+
+    if (hasStarted && !isMuted) {
+        // Try playing. If blocked, we rely on the next user interaction.
+        const p1 = music.play().catch(e => console.log("Music autoplay blocked, waiting for interaction"));
+        const p2 = fireplace.play().catch(e => console.log("Ambience autoplay blocked"));
+    } else {
+        music.pause();
+        fireplace.pause();
     }
-  }, [isMuted, hasStarted, showGameSetup]);
+  }, [isMuted, hasStarted]);
+
+  // Unlock audio on first interaction if blocked
+  const unlockAudio = () => {
+      if (audioRefs.current.music && audioRefs.current.music.paused && !isMuted && hasStarted) {
+          audioRefs.current.music.play().catch(() => {});
+          audioRefs.current.fireplace.play().catch(() => {});
+      }
+  };
 
   const addLog = (message: string) => setLog(prev => [...prev, message]);
   const addFloatingText = (text: string, color: string = "text-white") => {
@@ -351,6 +372,8 @@ export default function App() {
   // --- Networking Logic ---
 
   const initHost = () => {
+    // Unlock Audio Context on Host Start
+    unlockAudio();
     const peer = new Peer();
     peerRef.current = peer;
     (peer as any).on('open', (id: string) => { setPeerId(id); setLobbyStatus('Waiting for challengers...'); setMyPlayerId(0); });
@@ -364,6 +387,8 @@ export default function App() {
 
   const joinGame = () => {
       if (!hostIdInput || isConnecting) return;
+      // Unlock Audio Context on Client Join
+      unlockAudio();
       setIsConnecting(true);
       const peer = new Peer();
       peerRef.current = peer;
@@ -509,6 +534,13 @@ export default function App() {
   }, []);
 
   const initGame = (boardId: string, playerCount: number) => {
+      // Audio Init on Start
+      if (!isMuted) { 
+          // Explicitly play to unlock audio context on button click
+          audioRefs.current.music?.play().catch(()=>{});
+          playSfx('shuffle');
+      }
+
       const newPlayers: Player[] = [];
       for (let i = 0; i < playerCount; i++) {
           const shuffledStart = shuffle([...STARTING_DECK]);
@@ -541,8 +573,6 @@ export default function App() {
       setViewingSupplyCard(null);
       setConfirmingCardIndex(null);
 
-      if (!isMuted) { playSfx('shuffle'); audioRefs.current.music?.play().catch(()=>{}); }
-
       if (gameMode === 'ONLINE_HOST') {
           hostConnectionsRef.current.forEach((conn, idx) => conn.send({ type: 'START_GAME', payload: { yourPlayerId: idx + 1 } }));
           setTimeout(() => sendFullStateUpdate(newPlayers, newSupply, 1, 0, newLog), 100);
@@ -553,6 +583,9 @@ export default function App() {
   // --- Handlers (UI triggers) ---
 
   const handleHandCardClick = (index: number) => {
+      // Unlock audio on interaction
+      unlockAudio();
+
       // 1. Interaction Mode: Toggle Selection
       if (currentInteraction) {
           if (currentInteraction.type === 'HAND_SELECTION' || currentInteraction.type === 'CUSTOM_SELECTION') {
@@ -1536,9 +1569,27 @@ export default function App() {
       );
   }
 
+  // --- SAFEGUARD FOR MULTIPLAYER ---
+  // If game has started but player state hasn't arrived from network, show loading screen
+  // Only applies if we are NOT in the setup phase (because local/host setup also has empty players initially)
+  if (hasStarted && players.length === 0 && !showGameSetup) {
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-black p-4 text-center select-none" onClick={unlockAudio}>
+              <div className="atmosphere-noise"></div>
+              <EmberParticles />
+              <Loader size={48} className="text-[#c5a059] animate-spin mb-6" />
+              <h2 className="text-[#e6c888] font-serif text-2xl uppercase tracking-widest mb-2 animate-pulse">Synchronizing Realm...</h2>
+              <p className="text-[#5d4037] font-sans font-bold text-xs uppercase tracking-[0.2em]">Waiting for Host State</p>
+          </div>
+      );
+  }
+
   if (!hasStarted) {
       return (
-        <div className="min-h-screen flex items-end justify-center p-0 relative overflow-hidden bg-menu w-full h-full animate-in fade-in duration-1000">
+        <div 
+          className="min-h-screen flex items-end justify-center p-0 relative overflow-hidden bg-menu w-full h-full animate-in fade-in duration-1000"
+          onClick={unlockAudio} // Unlock audio interaction early
+        >
            {/* Global Atmosphere - using background from index.html */}
            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent pointer-events-none z-10"></div>
            <EmberParticles />
@@ -1762,7 +1813,7 @@ export default function App() {
   }
   
   return (
-    <div className="min-h-screen font-sans flex flex-col h-screen overflow-hidden relative select-none bg-game">
+    <div className="min-h-screen font-sans flex flex-col h-screen overflow-hidden relative select-none bg-game" onClick={unlockAudio}>
       <div className="atmosphere-noise"></div>
       <div className="vignette"></div>
       <EmberParticles />
