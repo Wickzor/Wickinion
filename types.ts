@@ -68,7 +68,7 @@ export interface AdvisorResponse {
 export type GameMode = 'LOCAL' | 'ONLINE_HOST' | 'ONLINE_CLIENT';
 
 export interface NetworkMessage {
-  type: 'JOIN' | 'START_GAME' | 'STATE_UPDATE' | 'ACTION';
+  type: 'JOIN' | 'START_GAME' | 'STATE_UPDATE' | 'ACTION' | 'RESOLVE_INTERACTION';
   payload?: any;
 }
 
