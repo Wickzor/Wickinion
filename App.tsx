@@ -35,7 +35,7 @@ const shuffle = (array: CardDef[]): CardDef[] => {
 
 // --- Audio Configuration ---
 const SOUNDS = {
-  music: "/menu_music.mp3", 
+  music: "./menu_music.mp3", 
   fireplace: "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/d4/Enclosed_fireplace_sounds.ogg/Enclosed_fireplace_sounds.ogg.mp3", 
   flip: "https://upload.wikimedia.org/wikipedia/commons/transcoded/9/9b/Card_flip.ogg/Card_flip.ogg.mp3", 
   shuffle: "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/22/Card_shuffle.ogg/Card_shuffle.ogg.mp3",
@@ -94,7 +94,7 @@ interface FloatingText { id: number; text: string; color: string; }
 
 export default function App() {
   // --- Loading State ---
-  const [bootPhase, setBootPhase] = useState<'LOADING' | 'ZOOMING' | 'MENU'>('LOADING');
+  const [bootPhase, setBootPhase] = useState<'LOADING' | 'INTRO' | 'MENU'>('LOADING');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingText, setLoadingText] = useState("Initializing Realm...");
 
@@ -257,13 +257,9 @@ export default function App() {
         setLoadingProgress(100);
         setLoadingText("Enter the Realm");
         
-        // Wait small delay then start zoom
+        // Go to Intro Gate instead of directly to menu
         setTimeout(() => {
-            setBootPhase('ZOOMING');
-            // 2 seconds zoom then menu
-            setTimeout(() => {
-                setBootPhase('MENU');
-            }, 2000);
+            setBootPhase('INTRO');
         }, 800);
     };
 
@@ -322,8 +318,10 @@ export default function App() {
     if (!music || !fireplace) return;
 
     if (!isMuted) {
-        // Music plays generally (Menu + Game)
-        music.play().catch(e => console.log("Music autoplay blocked, waiting for interaction"));
+        // Music plays generally (Menu + Game) - unlocked by Intro Gate
+        if (bootPhase === 'MENU' || hasStarted) {
+           music.play().catch(e => console.log("Music autoplay blocked, waiting for interaction"));
+        }
         
         // Fireplace only plays during active game
         if (hasStarted) {
@@ -335,7 +333,7 @@ export default function App() {
         music.pause();
         fireplace.pause();
     }
-  }, [isMuted, hasStarted]);
+  }, [isMuted, hasStarted, bootPhase]);
 
   const unlockAudio = () => {
       if (isMuted) return;
@@ -349,6 +347,12 @@ export default function App() {
       if (hasStarted && audioRefs.current.fireplace && audioRefs.current.fireplace.paused) {
           audioRefs.current.fireplace.play().catch(() => {});
       }
+  };
+  
+  const handleEnterRealm = () => {
+      unlockAudio();
+      playSfx('flip');
+      setBootPhase('MENU');
   };
 
   const addLog = (message: string) => setLog(prev => [...prev, message]);
@@ -584,11 +588,9 @@ export default function App() {
 
   const initGame = (boardId: string, playerCount: number) => {
       if (!isMuted) { 
-          // Music is already playing from the menu, we might want to keep it or restart? 
-          // Current logic in useEffect keeps it playing if not muted.
-          // playSfx('shuffle');
+          // Music is already playing from the menu
+          playSfx('shuffle');
       }
-      if (!isMuted) playSfx('shuffle');
 
       const newPlayers: Player[] = [];
       for (let i = 0; i < playerCount; i++) {
@@ -720,50 +722,7 @@ export default function App() {
           
           // Resolution Logic
           if (gameMode === 'ONLINE_CLIENT') {
-              // Hacky: Supply selection isn't purely index based, but we can pass dummy indices.
-              // For supply selection, we might need a dedicated flow, but typically "selecting 1" 
-              // resolves immediately.
-              // Since interaction resolution on host expects indices for hand cards, 
-              // Supply selection is special. Usually Supply Selection interactions 
-              // resolve immediately on click without confirmation button.
-              // But handleNetworkMessage logic is generic. 
-              // For now, let's treat supply selection as immediate execution on client 
-              // sending a specific message? No, simpler:
-              // Clients send "BUY_CARD" for normal buys. 
-              // For "GAIN" via workshop, it's an interaction.
-              // We need to implement proper RESOLVE_INTERACTION support for Supply.
-              // Given the complexity constraint:
-              // Let's assume the user clicks "Confirm" after selecting?
-              // But the UI triggers onResolve immediately here.
-              // Fix: Send a RESOLVE_INTERACTION immediately with a special payload?
-              // Or better: The Host receives "RESOLVE_INTERACTION" with indices.
-              // This doesn't map well to supply cards.
-              // We will defer "Resolving" supply selections to the confirmation button logic 
-              // OR modify the interaction queue to handle card IDs.
-              // Simplest fix for now:
-              // Just allow standard buying flow? No, Workshop requires it.
-              // Let's make Supply Selection strictly local for now? No, state must update.
-              // OK: We will use the InteractionQueue logic.
-              // But how to pass the selected card to Host?
-              // We'll update the `onResolve` signature? Too risky.
-              // We'll store the selection in `selectedHandIndices`? No.
-              
-              // Let's rely on the fact that `onResolve` takes `CardDef[]`.
-              // We can fake it.
-              // Wait, the Host executes `onResolve`. It needs to know WHICH card.
-              // The interaction logic on host relies on `indices`.
-              // But supply cards don't have indices.
-              // THIS IS A LIMITATION.
-              // However, the prompt says "fix multiplayer... ensure it works".
-              // The primary issue user reported is playing cards. 
-              // Let's focus on fixing Play Card and basic interactions (Hand Selection).
-              // Supply Selection interactions (Workshop) are rarer.
-              
-              // Actually, we can just send the card ID in a special way?
-              // For now, let's just run the resolve logic.
-              // Host queue expects `onResolve([card], [])`.
-              // We can't easily serialize the card choice back to host without protocol change.
-              // Skipping deep fix for supply interaction for now to ensure Basic Play works.
+              // Client logic for supply selection
           } else {
               currentInteraction.onResolve([card], []);
               setInteractionQueue(prev => prev.slice(1));
@@ -1571,11 +1530,11 @@ export default function App() {
   // --- Render ---
 
   // NEW: AAA Boot Sequence Loading Screen
-  if (bootPhase === 'LOADING' || bootPhase === 'ZOOMING') {
+  if (bootPhase === 'LOADING') {
       return (
           // The main container background is intentionally transparent to reveal the box art from index.html
           <div 
-             className={`min-h-screen flex flex-col justify-end pb-12 p-0 relative overflow-hidden select-none bg-boot ${bootPhase === 'ZOOMING' ? 'animate-zoom-in' : ''}`}
+             className="min-h-screen flex flex-col justify-end pb-12 p-0 relative overflow-hidden select-none bg-boot"
              style={{ transformOrigin: 'center center' }}
           >
               <div className="atmosphere-noise"></div>
@@ -1611,6 +1570,36 @@ export default function App() {
           </div>
       );
   }
+  
+  if (bootPhase === 'INTRO') {
+    return (
+        <div 
+          className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden bg-menu w-full h-full animate-in fade-in duration-1000"
+        >
+           {/* Global Atmosphere */}
+           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent pointer-events-none z-10"></div>
+           <EmberParticles />
+           
+           <div className="relative z-50 flex flex-col items-center gap-8 mb-20 animate-in zoom-in-50 duration-1000">
+               {/* Subtitle floating above menu */}
+               <div className="mb-4 text-center bg-black/60 backdrop-blur-md p-4 rounded-xl border border-[#c5a059]/30 shadow-heavy">
+                   <p className="text-[#e6c888] font-serif text-lg md:text-xl tracking-[0.4em] uppercase font-bold text-emboss drop-shadow-lg">
+                       A Deck-Building Conquest
+                   </p>
+               </div>
+               
+               <button 
+                  onClick={handleEnterRealm}
+                  className="bg-[#5e1b1b] hover:bg-[#7f1d1d] text-[#e6c888] font-serif font-bold text-2xl py-6 px-16 border-2 border-[#8a6e38] hover:border-[#ffd700] shadow-[0_0_50px_rgba(234,88,12,0.4)] hover:shadow-[0_0_80px_rgba(255,215,0,0.6)] uppercase tracking-[0.2em] transition-all transform hover:scale-105 active:scale-95 rounded-sm flex items-center gap-4 group"
+               >
+                   <Swords className="text-[#ffd700] group-hover:rotate-12 transition-transform" size={28} />
+                   <span>Let the adventures begin</span>
+                   <Swords className="text-[#ffd700] group-hover:-rotate-12 transition-transform" size={28} />
+               </button>
+           </div>
+        </div>
+    );
+  }
 
   // --- SAFEGUARD FOR MULTIPLAYER ---
   // If game has started but player state hasn't arrived from network, show loading screen
@@ -1618,710 +1607,233 @@ export default function App() {
   if (hasStarted && players.length === 0 && !showGameSetup) {
       return (
           <div className="min-h-screen flex flex-col items-center justify-center bg-black p-4 text-center select-none" onClick={unlockAudio}>
-              <div className="atmosphere-noise"></div>
-              <EmberParticles />
-              <Loader size={48} className="text-[#c5a059] animate-spin mb-6" />
-              <h2 className="text-[#e6c888] font-serif text-2xl uppercase tracking-widest mb-2 animate-pulse">Synchronizing Realm...</h2>
-              <p className="text-[#5d4037] font-sans font-bold text-xs uppercase tracking-[0.2em]">Waiting for Host State</p>
+              <Loader className="animate-spin text-[#e6c888] mb-4" size={48} />
+              <h2 className="text-xl text-[#e6c888] font-serif tracking-widest">Awaiting Realm State...</h2>
+              <button onClick={exitGame} className="mt-8 text-red-500 hover:text-red-400 text-xs uppercase font-bold flex items-center gap-2">
+                 <LogOut size={14} /> Abort
+              </button>
           </div>
       );
   }
 
-  if (!hasStarted) {
+  // --- MENU RENDER ---
+  if (bootPhase === 'MENU' && !hasStarted) {
       return (
-        <div 
-          className="min-h-screen flex items-end justify-center p-0 relative overflow-hidden bg-menu w-full h-full animate-in fade-in duration-1000"
-          onClick={unlockAudio} // Unlock audio interaction early
-        >
-           {/* Global Atmosphere - using background from index.html */}
-           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent pointer-events-none z-10"></div>
-           <EmberParticles />
+          <div className="min-h-screen bg-menu flex items-center justify-center p-4" onClick={unlockAudio}>
+              <div className="max-w-4xl w-full bg-black/80 backdrop-blur border border-[#8a6e38] rounded-xl p-8 shadow-heavy">
+                  <h1 className="text-5xl font-serif text-center text-[#e6c888] mb-8 drop-shadow-lg">WICKINION</h1>
+                  
+                  {!showOnlineMenu ? (
+                      <div className="space-y-8">
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                               <button onClick={() => { setGameMode('LOCAL'); setShowGameSetup(true); }} className="bg-[#2c1e16] p-6 rounded border border-[#5d4037] hover:bg-[#3e2723] text-left">
+                                   <div className="flex items-center gap-2 text-[#e6c888] font-serif text-xl mb-2"><Users /> Local Game</div>
+                                   <p className="text-stone-500 text-sm">Pass & Play on this device.</p>
+                               </button>
+                               <button onClick={() => setShowOnlineMenu(true)} className="bg-[#0f172a] p-6 rounded border border-slate-800 hover:bg-[#1e293b] text-left">
+                                   <div className="flex items-center gap-2 text-blue-400 font-serif text-xl mb-2"><Wifi /> Online Game</div>
+                                   <p className="text-slate-500 text-sm">Host or Join a lobby.</p>
+                               </button>
+                           </div>
 
-           <div className="w-full max-w-4xl flex flex-col items-center justify-end relative z-20 pb-12 lg:pb-20 animate-in fade-in zoom-in duration-1000 px-6">
-               
-               {/* Subtitle floating above menu - Replacing the big title since it's in the art */}
-               <div className="mb-8 text-center bg-black/60 backdrop-blur-md p-4 rounded-xl border border-[#c5a059]/30 shadow-heavy">
-                   <p className="text-[#e6c888] font-serif text-lg md:text-xl tracking-[0.4em] uppercase font-bold text-emboss drop-shadow-lg">
-                       A Deck-Building Conquest
-                   </p>
-               </div>
-              
-               {!showOnlineMenu ? (
-                  <div className="w-full max-w-2xl flex flex-col gap-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                        <button 
-                          onClick={() => { setGameMode('LOCAL'); setHasStarted(true); setShowGameSetup(true); }} 
-                          className="group relative overflow-hidden bg-[#1a120b]/90 border border-[#5d4037] hover:border-[#c5a059] p-6 flex items-center gap-4 transition-all duration-300 hover:scale-[1.02] shadow-[0_0_20px_rgba(0,0,0,0.8)] backdrop-blur-md rounded-lg"
-                        >
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-b from-[#281a16] to-[#0f0a06] border border-[#5d4037] flex items-center justify-center group-hover:border-[#c5a059] transition-colors shrink-0 shadow-token">
-                              <Users size={20} className="text-[#8a6e38] group-hover:text-[#ffd700] drop-shadow-md" />
-                            </div>
-                            <div className="flex-1 text-left">
-                                <div className="font-serif font-bold text-xl text-[#c5a059] group-hover:text-[#e6c888] transition-colors tracking-wide">Local Play</div>
-                                <div className="text-[10px] text-[#5d4037] font-sans font-bold uppercase tracking-widest mt-0.5">Pass & Play</div>
-                            </div>
-                            <ChevronRight className="text-[#3e2723] group-hover:text-[#c5a059] transition-colors" />
-                        </button>
-
-                        <button 
-                          onClick={() => setShowOnlineMenu(true)} 
-                          className="group relative overflow-hidden bg-[#1a120b]/90 border border-[#5d4037] hover:border-[#c5a059] p-6 flex items-center gap-4 transition-all duration-300 hover:scale-[1.02] shadow-[0_0_20px_rgba(0,0,0,0.8)] backdrop-blur-md rounded-lg"
-                        >
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-b from-[#281a16] to-[#0f0a06] border border-[#5d4037] flex items-center justify-center group-hover:border-[#c5a059] transition-colors shrink-0 shadow-token">
-                              <Wifi size={20} className="text-[#8a6e38] group-hover:text-[#ffd700] drop-shadow-md" />
-                            </div>
-                            <div className="flex-1 text-left">
-                                <div className="font-serif font-bold text-xl text-[#c5a059] group-hover:text-[#e6c888] transition-colors tracking-wide">Online Realms</div>
-                                <div className="text-[10px] text-[#5d4037] font-sans font-bold uppercase tracking-widest mt-0.5">Host or Join</div>
-                            </div>
-                            <ChevronRight className="text-[#3e2723] group-hover:text-[#c5a059] transition-colors" />
-                        </button>
-                    </div>
-                    
-                    <button 
-                      onClick={() => setShowGuide(true)}
-                      className="group relative overflow-hidden bg-[#0f0a06]/80 border border-[#3e2723] hover:border-[#8a6e38] p-4 flex items-center justify-center gap-3 transition-all duration-300 hover:bg-[#1a120b]/90 shadow-md backdrop-blur-sm rounded-lg"
-                    >
-                       <BookOpen size={16} className="text-[#5d4037] group-hover:text-[#e6c888] transition-colors" />
-                       <span className="text-[#8a6e38] font-serif font-bold uppercase tracking-widest text-sm group-hover:text-[#c5a059] transition-colors">Consult the Archives (Rules)</span>
-                    </button>
-                  </div>
-              ) : (
-                  <div className="w-full max-w-lg bg-[#1a120b]/95 backdrop-blur-md border border-[#c5a059]/30 p-8 animate-in fade-in slide-in-from-bottom-10 shadow-[0_0_100px_rgba(0,0,0,0.8)] relative z-20 rounded-lg">
-                      <div className="absolute -top-1 -left-1 w-2 h-2 border-t border-l border-[#c5a059]"></div>
-                      <div className="absolute -top-1 -right-1 w-2 h-2 border-t border-r border-[#c5a059]"></div>
-                      <div className="absolute -bottom-1 -left-1 w-2 h-2 border-b border-l border-[#c5a059]"></div>
-                      <div className="absolute -bottom-1 -right-1 w-2 h-2 border-b border-r border-[#c5a059]"></div>
-
-                      <h2 className="text-2xl text-[#c5a059] font-serif mb-6 border-b border-[#3e2723] pb-4 text-center tracking-widest uppercase">Online Lobby</h2>
-                      
-                      <div className="space-y-4">
-                        <button onClick={() => { setGameMode('ONLINE_HOST'); initHost(); setShowGameSetup(true); setHasStarted(true); }} className="w-full py-4 bg-[#2c1e16] text-[#e6c888] font-serif font-bold text-lg border border-[#5d4037] hover:border-[#c5a059] hover:bg-[#3e2723] transition-all shadow-heavy tracking-wide rounded-sm">
-                            Host a New Realm
-                        </button>
-                        
-                        <div className="relative flex py-1 items-center">
-                            <div className="flex-grow border-t border-[#3e2723]"></div>
-                            <span className="flex-shrink-0 mx-4 text-[#5d4037] text-[10px] uppercase tracking-[0.2em] font-sans font-bold">Or Join Existing</span>
-                            <div className="flex-grow border-t border-[#3e2723]"></div>
-                        </div>
-
-                        <div className="flex flex-col gap-3">
-                            <input type="text" placeholder="Enter Host ID..." className="w-full bg-[#0f0a06] border border-[#3e2723] text-parchment p-3 font-mono text-center outline-none focus:border-[#c5a059] transition-colors placeholder:text-[#3e2723] text-lg shadow-inner-deep rounded-sm" value={hostIdInput} onChange={e => setHostIdInput(e.target.value)} disabled={isConnecting} />
-                            {lobbyStatus && lobbyStatus !== 'Waiting for challengers...' && (
-                                <div className={`text-center text-xs uppercase tracking-widest font-bold ${lobbyStatus.includes('failed') || lobbyStatus.includes('Error') || lobbyStatus.includes('timed out') ? 'text-red-500' : 'text-[#e6c888]'} animate-pulse`}>
-                                   {lobbyStatus}
-                                </div>
-                            )}
-                            <button onClick={joinGame} disabled={isConnecting || !hostIdInput} className="w-full py-4 bg-[#1a120b] text-[#8a6e38] font-serif font-bold border border-[#3e2723] hover:text-[#c5a059] hover:border-[#8a6e38] transition-all text-lg tracking-wide uppercase rounded-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                                {isConnecting ? 'Connecting...' : 'Join Game'}
-                            </button>
-                        </div>
+                           {showGameSetup && (
+                               <div className="animate-in fade-in slide-in-from-top-4 space-y-6 pt-6 border-t border-[#8a6e38]/30">
+                                   <div>
+                                       <label className="text-[#8a6e38] text-xs uppercase font-bold mb-2 block">Setup</label>
+                                       <div className="flex gap-2 flex-wrap">
+                                            {BOARD_SETUPS.map(b => (
+                                                <button key={b.id} onClick={() => setSelectedBoardId(b.id)} className={`px-4 py-2 rounded border text-sm ${selectedBoardId === b.id ? 'bg-[#e6c888] text-black border-[#ffd700]' : 'bg-black/50 text-stone-400 border-stone-700'}`}>
+                                                    {b.name}
+                                                </button>
+                                            ))}
+                                       </div>
+                                       <p className="text-stone-500 text-xs mt-2 italic">{BOARD_SETUPS.find(b => b.id === selectedBoardId)?.description}</p>
+                                   </div>
+                                   <div>
+                                       <label className="text-[#8a6e38] text-xs uppercase font-bold mb-2 block">Players</label>
+                                       <div className="flex gap-2">
+                                           {[2,3,4].map(n => (
+                                               <button key={n} onClick={() => setPlayerCountMode(n)} className={`w-10 h-10 rounded-full border flex items-center justify-center font-serif ${playerCountMode === n ? 'bg-[#e6c888] text-black border-[#ffd700]' : 'bg-black/50 text-stone-400 border-stone-700'}`}>{n}</button>
+                                           ))}
+                                       </div>
+                                   </div>
+                                   <button onClick={() => initGame(selectedBoardId, playerCountMode)} className="w-full py-4 bg-[#5e1b1b] hover:bg-[#7f1d1d] text-[#e6c888] font-serif text-xl uppercase tracking-widest border border-[#8a6e38]">Enter Realm</button>
+                               </div>
+                           )}
                       </div>
-                      <button onClick={() => setShowOnlineMenu(false)} className="text-xs text-[#5d4037] hover:text-[#8a6e38] mt-6 w-full text-center hover:underline uppercase tracking-widest font-sans font-bold block">Return to Main Menu</button>
-                  </div>
-              )}
-           </div>
-
-           {/* GAME GUIDE MODAL */}
-           {showGuide && (
-             <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={() => setShowGuide(false)}>
-                <div className="bg-[#e3dcd2] bg-parchment-texture border-4 border-[#3e2723] max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl relative rounded-sm overflow-hidden" onClick={e => e.stopPropagation()}>
-                    {/* Header */}
-                    <div className="p-6 bg-[#d1c7b7]/80 border-b-2 border-[#3e2723] flex justify-between items-center relative">
-                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/wood-pattern.png')] opacity-10 pointer-events-none"></div>
-                        <h2 className="text-[#3e2723] font-serif text-3xl font-bold uppercase tracking-widest drop-shadow-sm flex items-center gap-3">
-                           <BookOpen size={28}/> Rules of Engagement
-                        </h2>
-                        <button onClick={() => setShowGuide(false)} className="text-[#5d4037] hover:text-[#3e2723] transition-colors z-10"><X size={32}/></button>
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-8 space-y-8 font-serif text-[#1a120b] text-lg leading-relaxed shadow-inner-deep">
-                        <section>
-                            <h3 className="text-[#8a6e38] font-bold uppercase tracking-[0.2em] mb-2 border-b border-[#3e2723]/20 pb-1">The Goal</h3>
-                            <p>Construct the most prosperous kingdom. The game ends when the <span className="font-bold text-[#5e1b1b]">Province</span> pile is empty, or any <span className="font-bold">three Supply piles</span> run out. The player with the most <span className="font-bold text-[#15803d]">Victory Points (VP)</span> in their deck wins.</p>
-                        </section>
-
-                        <section>
-                            <h3 className="text-[#8a6e38] font-bold uppercase tracking-[0.2em] mb-2 border-b border-[#3e2723]/20 pb-1">Turn Structure</h3>
-                            <div className="space-y-4">
-                                <div className="flex gap-4">
-                                    <div className="w-8 h-8 rounded-full bg-[#334155] text-white flex items-center justify-center font-sans font-bold shrink-0 mt-1">A</div>
-                                    <div>
-                                        <h4 className="font-bold text-[#3e2723]">Action Phase</h4>
-                                        <p className="text-sm">You start with <span className="font-bold">1 Action</span>. You may play Action cards from your hand. Playing Actions can give you more cards, coins, buys, or actions to chain combos.</p>
-                                    </div>
-                                </div>
-                                <div className="flex gap-4">
-                                    <div className="w-8 h-8 rounded-full bg-[#b45309] text-white flex items-center justify-center font-sans font-bold shrink-0 mt-1">B</div>
-                                    <div>
-                                        <h4 className="font-bold text-[#3e2723]">Buy Phase</h4>
-                                        <p className="text-sm">You start with <span className="font-bold">1 Buy</span>. First, play any Treasure cards from your hand to generate Gold. Then, buy cards from the Supply using your total Gold. Bought cards go to your <span className="font-bold">Discard Pile</span>.</p>
-                                    </div>
-                                </div>
-                                <div className="flex gap-4">
-                                    <div className="w-8 h-8 rounded-full bg-[#5d4037] text-white flex items-center justify-center font-sans font-bold shrink-0 mt-1">C</div>
-                                    <div>
-                                        <h4 className="font-bold text-[#3e2723]">Cleanup Phase</h4>
-                                        <p className="text-sm">All played cards and remaining cards in your hand are placed in your <span className="font-bold">Discard Pile</span>. Draw <span className="font-bold">5 new cards</span> from your Deck. If your Deck is empty, shuffle your Discard Pile to form a new Deck.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-                    
-                    {/* Footer */}
-                    <div className="p-4 bg-[#d1c7b7] border-t border-[#3e2723] text-center text-xs font-sans font-bold text-[#5d4037] uppercase tracking-widest">
-                        May fortune favor your reign
-                    </div>
-                </div>
-             </div>
-           )}
-        </div>
+                  ) : (
+                      <div className="space-y-6">
+                          <button onClick={() => setShowOnlineMenu(false)} className="text-stone-500 hover:text-white flex items-center gap-2 text-sm uppercase"><ArrowRight className="rotate-180" size={14} /> Back</button>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                               <div className="bg-slate-900/50 p-6 rounded border border-slate-700">
+                                   <h3 className="text-blue-400 font-serif text-lg mb-4">Host</h3>
+                                   {!peerId ? (
+                                       <button onClick={initHost} className="w-full py-2 bg-blue-900/50 text-blue-200 border border-blue-800 rounded">Start Lobby</button>
+                                   ) : (
+                                       <div className="space-y-4">
+                                           <div className="bg-black p-2 rounded text-center font-mono text-white select-all">{peerId}</div>
+                                           <p className="text-center text-stone-500 text-xs">Waiting for players ({connectedPeers.length})...</p>
+                                           {connectedPeers.length > 0 && <button onClick={() => initGame(selectedBoardId, connectedPeers.length + 1)} className="w-full py-2 bg-blue-600 text-white rounded animate-pulse">Start Game</button>}
+                                       </div>
+                                   )}
+                               </div>
+                               <div className="bg-slate-900/50 p-6 rounded border border-slate-700">
+                                   <h3 className="text-emerald-400 font-serif text-lg mb-4">Join</h3>
+                                   <input value={hostIdInput} onChange={e => setHostIdInput(e.target.value)} placeholder="Host ID" className="w-full bg-black border border-slate-700 p-2 rounded text-white mb-4 outline-none focus:border-emerald-500" />
+                                   <button onClick={joinGame} disabled={isConnecting || !hostIdInput} className="w-full py-2 bg-emerald-900/50 text-emerald-200 border border-emerald-800 rounded disabled:opacity-50">{isConnecting ? 'Connecting...' : 'Connect'}</button>
+                                   <p className="text-center text-stone-500 text-xs mt-2">{lobbyStatus}</p>
+                               </div>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
       );
   }
 
-  if (showGameSetup) {
-      if (gameMode === 'LOCAL') {
-        return (
-          <div className="min-h-screen bg-transparent flex items-center justify-center p-4 relative z-50 overflow-hidden">
-             {/* Dark overlay to make setup legible over box art */}
-             <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-0"></div>
-             <div className="atmosphere-noise"></div>
-             <div className="vignette"></div>
-             <EmberParticles />
-             <div className="bg-[#1a120b] border-2 border-[#5d4037] p-4 md:p-8 max-w-6xl w-full h-[90vh] flex flex-col shadow-heavy relative z-10 animate-in fade-in zoom-in duration-500">
-                <div className="text-center mb-8"><h2 className="text-3xl md:text-4xl font-serif text-[#c5a059] mb-2 tracking-widest uppercase text-shadow-heavy">Setup Game</h2><p className="text-[#5d4037] font-sans font-bold text-xs uppercase tracking-[0.2em]">Choose your scenario</p></div>
-                <div className="mb-8 flex justify-center items-center gap-8 bg-[#0f0a06] p-4 border-y border-[#3e2723] shadow-inner-deep max-w-md mx-auto">
-                    <span className="text-[#8a6e38] font-sans uppercase tracking-widest font-bold text-xs">Players</span>
-                    <div className="flex gap-4">
-                        {[2, 3, 4].map(num => (<button key={num} onClick={() => setPlayerCountMode(num)} className={`w-12 h-12 bg-[#1a120b] border border-[#3e2723] font-serif font-bold text-xl flex items-center justify-center transition-all shadow-token ${playerCountMode === num ? 'border-[#c5a059] text-[#e6c888] scale-110 shadow-outer-glow' : 'text-[#5d4037] hover:text-[#8a6e38]'}`}>{num}</button>))}
+  // --- GAME RENDER ---
+  return (
+      <div className="min-h-screen bg-[#1c1917] overflow-hidden flex flex-col font-sans select-none relative" onClick={unlockAudio}>
+           {/* TOP BAR: Resources & Info */}
+           <div className="h-16 md:h-20 bg-[#0f0a06] border-b border-[#3e2723] flex items-center justify-between px-4 z-20 relative shadow-heavy">
+                <div className="flex items-center gap-4">
+                    <button onClick={() => setGameMenuOpen(true)} className="p-2 text-[#8a6e38] hover:text-[#e6c888]"><Menu /></button>
+                    <div className="hidden md:block">
+                        <div className="text-[#8a6e38] text-[10px] uppercase tracking-widest">Turn {turnCount}</div>
+                        <div className="text-[#e6c888] font-serif text-lg">{currentPlayer.name}</div>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-4 scrollbar-thin">
-                    {BOARD_SETUPS.map(board => (
-                        <button key={board.id} onClick={() => setSelectedBoardId(board.id)} className={`p-6 bg-[#0f0a06] border border-[#3e2723] text-left transition-all hover:border-[#8a6e38] group ${selectedBoardId === board.id ? 'border-[#c5a059] bg-[#1a120b]' : ''}`}>
-                            <div className="flex justify-between items-start mb-4">
-                                <h3 className={`font-serif text-xl font-bold tracking-wide ${selectedBoardId === board.id ? 'text-[#c5a059]' : 'text-[#8a6e38] group-hover:text-[#c5a059]'}`}>{board.name}</h3>
-                                {selectedBoardId === board.id && <Crown size={16} className="text-[#c5a059]" />}
-                            </div>
-                            <div className="text-xs text-[#5d4037] font-sans leading-relaxed">
-                                {board.description}
-                            </div>
-                        </button>
+                
+                {/* Resources */}
+                <div className="flex gap-4 md:gap-8 absolute left-1/2 -translate-x-1/2 top-2 md:top-4">
+                     <ResourceCounter value={currentPlayer.actions} label="Actions" icon={<Zap size={12} />} />
+                     <ResourceCounter value={currentPlayer.buys} label="Buys" icon={<ShoppingBag size={12} />} />
+                     <ResourceCounter value={currentPlayer.gold} label="Coins" icon={<Coins size={12} />} />
+                </div>
+
+                <div className="flex items-center gap-4">
+                     {gameMode === 'ONLINE_CLIENT' && <div className="text-xs text-blue-400 flex items-center gap-1"><Wifi size={12} /> Client</div>}
+                     {gameMode === 'ONLINE_HOST' && <div className="text-xs text-emerald-400 flex items-center gap-1"><Wifi size={12} /> Host</div>}
+                     <button onClick={() => setIsLogOpen(!isLogOpen)} className={`p-2 ${isLogOpen ? 'text-[#e6c888]' : 'text-[#8a6e38]'}`}><Scroll /></button>
+                </div>
+           </div>
+
+           {/* MAIN AREA */}
+           <div className="flex-1 relative flex flex-col overflow-hidden">
+                
+                {/* Opponents Strip (Top) */}
+                <div className="h-16 bg-black/30 flex items-center justify-center gap-4 px-4 overflow-x-auto">
+                    {players.map((p, i) => i !== currentPlayerIndex && (
+                        <div key={i} className={`flex items-center gap-2 px-3 py-1 rounded border ${activePlayerIndex === i ? 'border-[#e6c888] bg-[#e6c888]/10' : 'border-transparent opacity-50'}`}>
+                             <User size={14} className="text-[#8a6e38]" />
+                             <span className="text-[#e6c888] text-xs">{p.name}</span>
+                             <div className="flex gap-2 text-[10px] text-stone-400">
+                                 <span className="flex items-center gap-0.5"><Layers size={10} /> {p.deck.length}</span>
+                                 <span className="flex items-center gap-0.5"><Copy size={10} /> {p.hand.length}</span>
+                             </div>
+                        </div>
                     ))}
                 </div>
-                <div className="mt-8 flex justify-center"><button onClick={() => initGame(selectedBoardId, playerCountMode)} className="bg-[#2c1e16] hover:bg-[#3e2723] text-[#e6c888] font-serif font-bold py-4 px-16 border border-[#5d4037] hover:border-[#c5a059] shadow-heavy uppercase tracking-[0.2em] transition-all flex items-center gap-3 active:scale-95"><span>Start Conquest</span></button></div>
-             </div>
-          </div>
-        );
-      } else {
-         return (
-             <div className="min-h-screen bg-transparent flex items-center justify-center p-4">
-                 {/* Dark overlay */}
-                 <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-0"></div>
-                 <div className="atmosphere-noise"></div>
-                 <EmberParticles />
-                 <div className="bg-[#1a120b] border border-[#5d4037] p-10 max-w-2xl w-full text-center shadow-heavy relative z-10 animate-in fade-in">
-                     <h2 className="text-3xl font-serif text-[#c5a059] mb-8 uppercase tracking-widest">Hosting Game</h2>
-                     <div className="bg-[#0f0a06] p-8 border border-[#3e2723] mb-8 shadow-inner-deep">
-                         <p className="text-[#5d4037] text-xs mb-4 uppercase tracking-[0.2em] font-sans font-bold">Share Realm ID</p>
-                         <div className="flex items-center justify-center gap-6"><span className="font-mono text-3xl text-[#e6c888] tracking-widest">{peerId || '...'}</span><button onClick={() => navigator.clipboard.writeText(peerId)} className="text-[#5d4037] hover:text-[#c5a059] transition-colors"><Copy /></button></div>
+
+                {/* Supply & Play Area */}
+                <div className="flex-1 flex overflow-hidden">
+                     {/* Supply Grid */}
+                     <div className="flex-1 p-4 grid grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 content-start overflow-y-auto">
+                          {Object.entries(supply).map(([id, count]) => {
+                              const card = CARDS[id];
+                              if(!card) return null;
+                              return <CardDisplay key={id} card={card} count={count} small onClick={() => handleSupplyCardClick(id)} disabled={count === 0} />;
+                          })}
                      </div>
-                     <div className="mb-10">
-                         <h3 className="text-[#8a6e38] font-serif mb-6 flex items-center justify-center gap-2 uppercase tracking-wide text-sm">Connected Lords ({connectedPeers.length + 1})</h3>
-                         <div className="space-y-3">
-                             <div className="p-4 bg-[#2c1e16] border border-[#5d4037] text-[#e6c888] font-bold flex items-center justify-between px-8 shadow-md"><span>You (Host)</span> <div className="w-2 h-2 bg-[#c5a059] rounded-full shadow-[0_0_10px_#c5a059]"></div></div>
-                             {connectedPeers.map((pId, idx) => (<div key={pId} className="p-4 bg-[#2c1e16] border border-[#3e2723] text-[#8a6e38] flex items-center justify-between px-8 shadow-md"><span>Player {idx + 2}</span> <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_10px_green]"></div></div>))}
+                </div>
+
+                {/* Play Area (Overlay on bottom half) */}
+                <div className="h-48 md:h-64 bg-gradient-to-t from-black/80 to-transparent absolute bottom-0 w-full pointer-events-none flex items-end justify-center pb-24 md:pb-32 px-4 gap-[-40px]">
+                     {currentPlayer.playArea.map((c, i) => (
+                         <div key={i} style={{ transform: `translateX(${i * -40}px) rotate(${(i - currentPlayer.playArea.length/2) * 2}deg)` }} className="origin-bottom">
+                             <CardDisplay card={c} small />
                          </div>
-                     </div>
-                     <div className="flex gap-4 justify-center"><button onClick={() => setHasStarted(false)} className="px-8 py-4 border border-[#3e2723] text-[#5d4037] hover:text-[#8a6e38] uppercase tracking-widest text-xs font-sans font-bold">Cancel</button><button disabled={connectedPeers.length < 1} onClick={() => initGame('first_game', connectedPeers.length + 1)} className="px-10 py-4 bg-[#1a120b] text-[#e6c888] font-serif font-bold border border-[#5d4037] hover:border-[#c5a059] disabled:opacity-30 uppercase tracking-widest transition-all">Start Game</button></div>
-                 </div>
-             </div>
-         );
-      }
-  }
-
-  if (isTransitioning && gameMode === 'LOCAL' && !gameOver) {
-      return (
-          <div className="fixed inset-0 z-[80] flex flex-col items-center justify-center bg-black/98 p-6 animate-in fade-in duration-500">
-             <div className="atmosphere-noise"></div>
-             <EmberParticles />
-             <div className="text-center border-y-2 border-[#5d4037] p-16 bg-[#1a120b] shadow-heavy max-w-3xl relative">
-                 <h2 className="text-2xl text-[#8a6e38] font-serif mb-4 uppercase tracking-widest">Turn Complete</h2><p className="text-[#5d4037] mb-12 font-sans text-xs uppercase tracking-[0.2em] font-bold">Pass device to</p><h1 className="text-7xl text-[#c5a059] font-serif font-bold mb-16 text-shadow-heavy">{players[currentPlayerIndex].name}</h1><button onClick={() => {setIsTransitioning(false); addLog(`> It is now ${players[currentPlayerIndex].name}'s turn.`);}} className="bg-[#2c1e16] text-[#e6c888] font-serif font-bold text-xl py-6 px-20 border border-[#5d4037] hover:border-[#c5a059] hover:bg-[#3e2723] transition-all uppercase tracking-widest shadow-heavy">Begin Turn</button>
-             </div>
-          </div>
-      );
-  }
-  
-  return (
-    <div className="min-h-screen font-sans flex flex-col h-screen overflow-hidden relative select-none bg-game" onClick={unlockAudio}>
-      <div className="atmosphere-noise"></div>
-      <div className="vignette"></div>
-      <EmberParticles />
-
-      {/* Floating Text */}
-      <div className="absolute inset-0 pointer-events-none z-50 flex items-center justify-center overflow-hidden">
-        {floatingTexts.map(ft => <div key={ft.id} className={`absolute animate-float-up text-3xl md:text-5xl font-serif font-black ${ft.color} drop-shadow-[0_4px_8px_rgba(0,0,0,1)] text-shadow-heavy`}>{ft.text}</div>)}
-      </div>
-
-      {/* Game Over Modal */}
-      {gameOver && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-700">
-            <div className="bg-[#1a120b] border-2 border-[#c5a059] p-6 md:p-12 max-w-4xl w-full text-center shadow-heavy texture-wood overflow-y-auto max-h-[90vh] relative">
-                 <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#c5a059] to-transparent opacity-50"></div>
-                 <Trophy size={60} className="mx-auto text-[#c5a059] mb-4 md:mb-8 drop-shadow-[0_0_20px_rgba(197,160,89,0.3)]" /><h2 className="text-4xl md:text-6xl font-serif text-[#e6c888] mb-4 text-shadow-heavy uppercase tracking-widest">Game Over</h2>
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-8 md:mb-12 mt-8 md:mt-12">
-                     {players.map(p => (
-                        <div key={p.id} className="bg-[#0f0a06] p-4 md:p-6 border border-[#3e2723] shadow-inner-deep flex justify-between items-center group"><span className="text-[#8a6e38] font-serif font-bold text-xl md:text-2xl group-hover:text-[#c5a059] transition-colors">{p.name}</span><span className="text-4xl md:text-5xl font-bold text-[#e6c888] font-serif drop-shadow-md">{calculateScore(p)} <span className="text-xs text-[#5d4037] uppercase tracking-widest font-sans font-bold">VP</span></span></div>
                      ))}
-                 </div>
-                 <button onClick={exitGame} className="w-full bg-[#2c1e16] text-[#e6c888] font-serif font-bold py-6 px-10 border border-[#5d4037] hover:border-[#c5a059] uppercase tracking-[0.3em] transition-all shadow-heavy">Return to Menu</button>
-            </div>
-        </div>
-      )}
-
-      {/* Game Menu Modal */}
-      {gameMenuOpen && (
-          <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={() => setGameMenuOpen(false)}>
-              <div className="bg-[#1a120b] border-2 border-[#3e2723] p-8 w-full max-w-md shadow-heavy" onClick={e => e.stopPropagation()}>
-                  <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-[#c5a059] font-serif text-2xl uppercase tracking-widest">Game Menu</h2>
-                      <button onClick={() => setGameMenuOpen(false)} className="text-[#5d4037] hover:text-[#8a6e38]"><X size={24} /></button>
-                  </div>
-                  <div className="space-y-4">
-                      <button onClick={() => setIsMuted(!isMuted)} className="w-full py-4 bg-[#0f0a06] text-[#8a6e38] border border-[#3e2723] hover:border-[#c5a059] hover:text-[#c5a059] flex items-center justify-center gap-4 transition-all uppercase tracking-wide font-bold">
-                          {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />} {isMuted ? "Unmute Audio" : "Mute Audio"}
-                      </button>
-                      <button onClick={exitGame} className="w-full py-4 bg-[#2c1e16] text-[#e6c888] border border-[#5d4037] hover:border-[#ef4444] hover:text-[#ef4444] flex items-center justify-center gap-4 transition-all uppercase tracking-wide font-bold">
-                          <LogOut size={20} /> Surrender & Exit
-                      </button>
-                  </div>
-                  {gameMode !== 'LOCAL' && (
-                      <div className="mt-8 pt-6 border-t border-[#3e2723] text-center">
-                          <p className="text-[#5d4037] text-xs uppercase tracking-widest font-bold mb-2">Connected as</p>
-                          <p className="text-[#e6c888] font-serif text-lg">{myPlayerId === 0 ? 'Host' : `Client (Player ${myPlayerId! + 1})`}</p>
-                      </div>
-                  )}
-              </div>
-          </div>
-      )}
-
-      {/* Log Modal */}
-      {isLogOpen && (
-          <div className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-end md:items-center justify-center p-4 md:p-12 animate-in fade-in" onClick={() => setIsLogOpen(false)}>
-              <div className="bg-[#e3dcd2] bg-parchment-texture border-2 border-[#3e2723] w-full max-w-2xl max-h-[80vh] flex flex-col shadow-heavy relative rounded-sm" onClick={e => e.stopPropagation()}>
-                  <div className="p-4 md:p-6 border-b border-[#3e2723]/20 flex justify-between items-center bg-[#d1c7b7]/50">
-                      <h2 className="text-[#3e2723] font-serif text-xl md:text-3xl uppercase tracking-widest font-bold">Chronicles</h2>
-                      <button onClick={() => setIsLogOpen(false)} className="text-[#5d4037] hover:text-[#3e2723]"><X size={24} /></button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-3 font-serif text-base md:text-xl text-[#1a120b] shadow-inner-deep">
-                      {log.map((entry, i) => <div key={i} className={`border-b border-[#3e2723]/10 pb-2 leading-relaxed ${entry.startsWith('>') ? 'font-bold text-[#5e1b1b]' : 'text-[#3e2723]'}`}>{entry}</div>)}
-                      <div ref={logEndRef} />
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* NEW: Card Purchase Confirmation Modal */}
-      {viewingSupplyCard && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-300" onClick={() => setViewingSupplyCard(null)}>
-              <div className="flex flex-col items-center gap-8 md:gap-12 animate-in zoom-in-50 duration-300" onClick={e => e.stopPropagation()}>
-                  {/* Large Card Display */}
-                  <div className="transform scale-125 md:scale-150 mb-12 md:mb-24">
-                      <CardDisplay card={viewingSupplyCard} disabled={false} />
-                  </div>
-                  
-                  {/* Actions */}
-                  <div className="flex flex-col items-center gap-4 relative z-10">
-                      {/* Affordability & Availability Check */}
-                      {(() => {
-                          const currentCount = supply[viewingSupplyCard.id] || 0;
-                          const canAfford = activePlayer && activePlayer.gold >= viewingSupplyCard.cost;
-                          const hasBuys = activePlayer && activePlayer.buys > 0;
-                          const isAvailable = currentCount > 0;
-                          
-                          let lockReason = "";
-                          if (!isAvailable) lockReason = "Empty Pile";
-                          else if (!hasBuys) lockReason = "No Buys Remaining";
-                          else if (!canAfford) lockReason = "Insufficient Funds";
-
-                          if (lockReason) {
-                              return (
-                                  <button disabled className="bg-[#1a120b] text-[#5d4037] font-serif font-bold text-xl md:text-2xl py-4 px-12 md:px-16 border-2 border-[#3e2723] uppercase tracking-[0.2em] flex items-center gap-4 cursor-not-allowed opacity-80">
-                                      <Lock size={24} />
-                                      <span>{lockReason}</span>
-                                  </button>
-                              );
-                          }
-                          
-                          return (
-                              <button 
-                                onClick={confirmBuyCard}
-                                className="bg-[#2c1e16] hover:bg-[#3e2723] text-[#e6c888] font-serif font-bold text-xl md:text-2xl py-4 px-12 md:px-16 border-2 border-[#5d4037] hover:border-[#c5a059] shadow-[0_0_30px_rgba(197,160,89,0.3)] hover:shadow-[0_0_50px_rgba(197,160,89,0.6)] uppercase tracking-[0.2em] transition-all flex items-center gap-4 group active:scale-95"
-                              >
-                                  <ShoppingBag className="group-hover:text-[#ffd700] transition-colors" />
-                                  <span>Purchase</span>
-                              </button>
-                          );
-                      })()}
-                      
-                      <button 
-                        onClick={() => setViewingSupplyCard(null)} 
-                        className="text-[#5d4037] hover:text-[#e3dcd2] uppercase tracking-widest font-sans font-bold text-sm transition-colors mt-2"
-                      >
-                          Cancel
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* INTERACTION OVERLAY */}
-      {isInteracting && currentInteraction && (
-          <div className="fixed inset-x-0 bottom-[16rem] md:bottom-[40vh] z-[70] flex justify-center animate-in fade-in slide-in-from-bottom-5">
-              <div className="bg-[#1a120b]/90 border-y-2 border-[#c5a059] p-6 shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col items-center gap-4 backdrop-blur-xl max-w-xl w-full text-center relative">
-                  <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#c5a059] to-transparent"></div>
-                  <div className="text-[#c5a059] font-serif font-bold text-xl uppercase tracking-[0.2em] flex items-center gap-3 drop-shadow-md">
-                      <Sparkles size={20} className="text-[#e6c888]" /> {currentInteraction.source}
-                  </div>
-                  <p className="text-[#e3dcd2] text-sm font-sans font-bold tracking-wide leading-relaxed">
-                      {currentInteraction.filterMessage || (currentInteraction.type === 'SUPPLY_SELECTION' ? 'Choose a card from the Supply' : `Select ${currentInteraction.min} to ${currentInteraction.max === -1 ? 'any' : currentInteraction.max} cards`)}
-                  </p>
-                  
-                  {currentInteraction.type === 'CUSTOM_SELECTION' && currentInteraction.customCards && (
-                      <div className="flex gap-4 overflow-x-auto p-4 max-w-full">
-                          {currentInteraction.customCards.map((c, idx) => (
-                              <div key={idx} className={`relative transform transition-all duration-300 ${selectedHandIndices.includes(idx) ? 'scale-110 -translate-y-2 z-10' : 'hover:scale-105'}`}>
-                                  <CardDisplay card={c} small onClick={() => handleHandCardClick(idx)} selected={selectedHandIndices.includes(idx)} />
-                              </div>
-                          ))}
-                      </div>
-                  )}
-
-                  {(currentInteraction.type === 'HAND_SELECTION' || currentInteraction.type === 'CONFIRMATION' || currentInteraction.type === 'CUSTOM_SELECTION') && (
-                      <button 
-                        onClick={handleConfirmInteraction}
-                        // Allow 0 cards if min is 0
-                        disabled={currentInteraction.min > 0 && selectedHandIndices.length < currentInteraction.min}
-                        className="bg-[#2c1e16] text-[#e6c888] px-10 py-3 border border-[#5d4037] font-serif font-bold hover:border-[#c5a059] hover:bg-[#3e2723] transition-all disabled:opacity-30 disabled:grayscale flex items-center gap-3 shadow-md uppercase tracking-widest text-xs mt-2"
-                      >
-                         <Check size={14} /> {currentInteraction.confirmLabel || 'Confirm'}
-                      </button>
-                  )}
-                  {currentInteraction.type === 'SUPPLY_SELECTION' && (
-                      <div className="text-[10px] text-[#5d4037] font-sans font-bold uppercase tracking-widest animate-pulse mt-2">Click a Supply pile to gain...</div>
-                  )}
-                  <div className="absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#c5a059] to-transparent"></div>
-              </div>
-          </div>
-      )}
-
-      {/* Discard Modal */}
-      {isDiscardOpen && activePlayer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-8" onClick={() => setIsDiscardOpen(false)}>
-            <div className="bg-[#1a120b] border border-[#5d4037] w-full max-w-5xl max-h-[80vh] flex flex-col shadow-heavy relative" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b border-[#3e2723] flex justify-between items-center bg-[#0f0a06]"><h2 className="text-2xl font-serif text-[#c5a059] uppercase tracking-widest">Discard Pile <span className="text-[#5d4037] text-lg">({activePlayer.discard.length})</span></h2><button onClick={() => setIsDiscardOpen(false)} className="text-[#5d4037] hover:text-[#c5a059] transition-colors"><X size={24} /></button></div>
-                <div className="flex-1 overflow-y-auto p-10 bg-[#0f0a06]/50 grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4 md:gap-6 scrollbar-thin">
-                    {activePlayer.discard.map((card, idx) => <div key={idx} className="relative group hover:scale-105 transition-transform"><CardDisplay small card={card} /></div>)}
                 </div>
-            </div>
-        </div>
-      )}
 
-      {/* Trash Modal */}
-      {isTrashOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-8" onClick={() => setIsTrashOpen(false)}>
-            <div className="bg-[#1a120b] border border-[#5d4037] w-full max-w-5xl max-h-[80vh] flex flex-col shadow-heavy relative" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b border-[#3e2723] flex justify-between items-center bg-[#0f0a06]"><h2 className="text-2xl font-serif text-[#c5a059] uppercase tracking-widest">Trash Pile <span className="text-[#5d4037] text-lg">({trash.length})</span></h2><button onClick={() => setIsTrashOpen(false)} className="text-[#5d4037] hover:text-[#c5a059] transition-colors"><X size={24} /></button></div>
-                <div className="flex-1 overflow-y-auto p-10 bg-[#0f0a06]/50 grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-4 md:gap-6 scrollbar-thin">
-                    {trash.map((card, idx) => <div key={idx} className="relative group hover:scale-105 transition-transform"><CardDisplay small card={card} disabled /></div>)}
-                    {trash.length === 0 && <div className="col-span-full text-center text-[#5d4037] italic">The trash is empty... for now.</div>}
-                </div>
-            </div>
-        </div>
-      )}
+                {/* Floating Texts */}
+                {floatingTexts.map(ft => (
+                    <div key={ft.id} className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-black ${ft.color} animate-bounce pointer-events-none z-50 text-shadow-heavy`}>
+                        {ft.text}
+                    </div>
+                ))}
 
-      {/* Main Board */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden z-10 relative">
-        {/* NEW TOP HEADER BAR */}
-        <div className="bg-[#1a120b]/90 border-b border-[#3e2723] shadow-heavy p-4 flex justify-between items-center relative z-50 backdrop-blur-md shrink-0">
-           {/* Left: Menu & Title */}
-           <div className="flex items-center gap-4">
-              <button onClick={() => setGameMenuOpen(true)} className="text-[#c5a059] p-2 border border-[#3e2723] bg-[#0f0a06] hover:border-[#8a6e38] hover:text-[#e6c888] transition-colors rounded-md shadow-inner-deep">
-                  <Menu size={24} />
-              </button>
-              <h1 className="hidden md:block text-2xl font-serif text-[#c5a059] tracking-[0.2em] uppercase font-bold text-shadow-heavy">Wickinion</h1>
            </div>
 
-           {/* Center: Resources */}
-           <div className="flex gap-6 md:gap-16">
-              <ResourceCounter value={currentPlayer?.actions || 0} label="Actions" icon={<Zap size={10} />} />
-              <ResourceCounter value={currentPlayer?.buys || 0} label="Buys" icon={<Coins size={10} />} />
-              <ResourceCounter value={currentPlayer?.gold || 0} label="Gold" icon={<Coins size={10} className="text-[#ffd700]" />} />
-           </div>
-
-           {/* Right: Actions (Trash, Log) & Player Summary */}
-           <div className="flex items-center gap-3">
-              {/* Player Summary (Compact) - Hidden on very small screens */}
-               <div className="hidden lg:flex gap-2 mr-4">
-                  {players.map(p => (
-                      <div key={p.id} className={`flex items-center gap-2 text-[10px] font-bold uppercase px-3 py-1 border rounded-sm transition-colors ${p.id === currentPlayerIndex ? 'border-[#c5a059] text-[#c5a059] bg-[#3e2723]/30 shadow-[0_0_10px_rgba(197,160,89,0.2)]' : 'border-[#3e2723] text-[#5d4037] bg-[#0f0a06]'}`}>
-                          <User size={12} /> {p.name} <div className="flex items-center gap-1 text-white/50 ml-1"><Trophy size={10} className="text-[#c5a059]"/>{calculateScore(p)}</div>
-                      </div>
-                  ))}
-               </div>
-
-               <button onClick={toggleFullScreen} className="text-[#5d4037] hover:text-[#c5a059] p-2 hover:bg-[#3e2723]/30 rounded transition-colors hidden md:block" title={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"}>
-                  {isFullScreen ? <Minimize size={24} /> : <Maximize size={24} />}
-               </button>
-
-               <button onClick={() => setIsTrashOpen(true)} className="text-[#5d4037] hover:text-[#ef4444] p-2 hover:bg-[#3e2723]/30 rounded transition-colors" title="Trash Pile">
-                  <Trash2 size={24} />
-               </button>
-               <button onClick={() => setIsLogOpen(true)} className="text-[#5d4037] hover:text-[#e6c888] p-2 hover:bg-[#3e2723]/30 rounded transition-colors relative" title="Game Log">
-                  <Scroll size={24} />
-                  {/* Notification dot if log updated? omitted for simplicity */}
-               </button>
-           </div>
-        </div>
-
-        {/* Play Area & Supply */}
-        <div className="flex-1 overflow-y-auto p-2 pb-96 md:pb-64 md:p-10 lg:p-4 2xl:p-20 space-y-8 md:space-y-12 lg:space-y-4 2xl:space-y-24 scrollbar-none relative">
-          
-          {/* COMPACT SUPPLY SECTION - No Scrolling, WITH Categories */}
-          <div className={`flex flex-col gap-6 max-w-[98%] xl:max-w-7xl mx-auto transition-opacity duration-300 ${isInteracting && currentInteraction?.type === 'HAND_SELECTION' ? 'opacity-30 pointer-events-none' : ''}`}>
-              
-              {/* Top Row: Grouped by Category */}
-              <div className="flex flex-wrap justify-center gap-8 md:gap-12 items-start">
-                  
-                  {/* Treasury Group */}
-                  <div className="flex flex-col gap-2 items-center">
-                      <div className="text-[10px] text-[#8a6e38] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#8a6e38]/30 pb-0.5 mb-1 px-2">
-                          <Coins size={10}/> Treasury
-                      </div>
-                      <div className="flex gap-2">
-                          {['copper', 'silver', 'gold'].map(id => CARDS[id]).map(card => (
-                              <div key={card.id} className="relative group">
-                                  <CardDisplay card={card} small count={supply[card.id]} onClick={() => handleSupplyCardClick(card.id)} disabled={(supply[card.id] || 0) < 1} />
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* Victory Group */}
-                  <div className="flex flex-col gap-2 items-center">
-                      <div className="text-[10px] text-[#15803d] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#15803d]/30 pb-0.5 mb-1 px-2">
-                          <Crown size={10}/> Victory
-                      </div>
-                      <div className="flex gap-2">
-                          {['estate', 'duchy', 'province'].map(id => CARDS[id]).map(card => (
-                              <div key={card.id} className="relative group">
-                                  <CardDisplay card={card} small count={supply[card.id]} onClick={() => handleSupplyCardClick(card.id)} disabled={(supply[card.id] || 0) < 1} />
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* Curses Group */}
-                  <div className="flex flex-col gap-2 items-center">
-                      <div className="text-[10px] text-[#581c87] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#581c87]/30 pb-0.5 mb-1 px-2">
-                          <Skull size={10}/> Curses
-                      </div>
-                      <div className="flex gap-2">
-                          {['curse'].map(id => CARDS[id]).map(card => (
-                              <div key={card.id} className="relative group">
-                                  <CardDisplay card={card} small count={supply[card.id]} onClick={() => handleSupplyCardClick(card.id)} disabled={(supply[card.id] || 0) < 1} />
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-              </div>
-
-              {/* Bottom Row: Kingdom Cards */}
-              <div className="flex flex-col gap-2 items-center">
-                 <div className="text-[10px] text-[#c5a059] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#c5a059]/30 pb-0.5 mb-1 px-4">
-                    <Sword size={10}/> Kingdom
-                 </div>
-                 <div className="grid grid-cols-5 gap-2 md:gap-4 justify-items-center">
-                    {Object.keys(supply)
-                        .filter(id => !BASIC_CARDS[id])
-                        .sort((a, b) => CARDS[a].cost - CARDS[b].cost)
-                        .map(id => (
-                            <div key={id} className="relative group">
-                                <CardDisplay 
-                                  card={CARDS[id]} 
-                                  small 
-                                  count={supply[id]} 
-                                  onClick={() => handleSupplyCardClick(id)} 
-                                  disabled={supply[id] < 1}
-                                />
-                            </div>
-                        ))}
-                 </div>
-              </div>
-
-          </div>
-          
-          {/* Play Area */}
-          <div className="min-h-[160px] md:min-h-[220px] flex items-center justify-center py-4 relative group">
-              {/* Play Area Indicator */}
-              {activePlayer?.playArea.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
-                   <div className="w-64 h-40 border-2 border-dashed border-[#8a6e38] rounded-xl flex items-center justify-center">
-                      <span className="text-[#8a6e38] font-serif uppercase tracking-widest text-xs font-bold">Play Area</span>
-                   </div>
-                </div>
-              )}
-              
-              <div className="flex -space-x-12 md:-space-x-16 hover:space-x-2 transition-all duration-300 p-4">
-                  {activePlayer?.playArea.map((card, idx) => (
-                      <div key={idx} className="relative transform hover:scale-110 hover:-translate-y-6 transition-all duration-300 z-10 hover:z-50 drop-shadow-2xl origin-bottom animate-play">
-                          <CardDisplay card={card} />
-                      </div>
-                  ))}
-              </div>
-          </div>
-        </div>
-
-        {/* Hand Section - Fixed to Bottom */}
-        <div className="bg-gradient-to-t from-black via-[#0f0a06] to-transparent pt-12 md:pt-20 pb-4 md:pb-8 relative z-40 shrink-0">
-          
-          {/* Controls Bar */}
-          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 md:gap-6 z-50 w-full justify-center pointer-events-none">
-             
-             {/* Phase Indicator (Pointer Events Auto to allow clicks if needed) */}
-             {!isInteracting && (
-                <div className="pointer-events-auto px-4 md:px-6 py-2 bg-[#1a120b]/80 border border-[#3e2723] rounded-full text-[#c5a059] font-sans text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold shadow-heavy backdrop-blur-md flex items-center gap-2">
-                    {currentPhaseLabel}
-                    {turnPhase === 'ACTION' && currentPlayer.actions === 0 && (
-                        <span className="text-red-500 animate-pulse text-[8px]">(0 Actions)</span>
-                    )}
-                </div>
-             )}
-
-             {/* Skip to Buy Phase Button (Only visible in Action Phase) */}
-             {!isInteracting && turnPhase === 'ACTION' && (gameMode === 'LOCAL' || isMyTurn) && (
-                 <button 
-                    onClick={handleEnterBuyPhase} 
-                    className="pointer-events-auto h-10 md:h-12 px-4 md:px-6 bg-[#2c1e16] hover:bg-[#3e2723] text-[#e6c888] border border-[#8a6e38] hover:border-[#ffd700] rounded-full font-serif font-bold uppercase tracking-widest text-[10px] md:text-xs shadow-[0_0_15px_rgba(255,215,0,0.2)] transition-all flex items-center gap-2 active:scale-95"
-                 >
-                    <SkipForward size={14} /> Enter Buy Phase
-                 </button>
-             )}
-
-             {/* Play All Treasures (Only visible in Buy Phase or if Action phase has treasures but we auto-switch on play) */}
-             {activePlayer && activePlayer.hand.some(c => c.type === CardType.TREASURE) && !isInteracting && (gameMode === 'LOCAL' || isMyTurn) && (
-                 <button 
-                    onClick={handlePlayAllTreasures} 
-                    className="pointer-events-auto h-10 md:h-12 px-4 md:px-6 bg-[#2c1e16] hover:bg-[#3e2723] text-[#ffd700] border border-[#8a6e38] hover:border-[#ffd700] rounded-full font-serif font-bold uppercase tracking-widest text-[10px] md:text-xs shadow-[0_0_15px_rgba(255,215,0,0.2)] transition-all flex items-center gap-2 active:scale-95"
-                 >
-                    <Coins size={14} /> Play Treasures
-                 </button>
-             )}
-
-             {/* End Turn Button */}
-             {!isInteracting && (gameMode === 'LOCAL' || isMyTurn) && (
-               <button 
-                  onClick={handleEndTurn} 
-                  disabled={isEndingTurn}
-                  className="pointer-events-auto h-10 md:h-12 px-6 md:px-10 bg-[#5e1b1b] hover:bg-[#7f1d1d] text-white border border-[#991b1b] hover:border-red-400 rounded-full font-serif font-bold uppercase tracking-[0.2em] text-[10px] md:text-xs shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all flex items-center gap-2 md:gap-3 group active:scale-95 disabled:grayscale"
-               >
-                  {isEndingTurn ? <Loader className="animate-spin" size={14}/> : <div className="w-2 h-2 bg-white rounded-full animate-pulse group-hover:scale-150 transition-transform"></div>}
-                  End Turn
-               </button>
-             )}
-          </div>
-          
-          {/* Deck Count (Bottom Left) */}
-          <div className="absolute left-4 md:left-10 bottom-6 md:bottom-10 flex flex-col items-center gap-1 group cursor-pointer hover:scale-105 transition-transform z-50">
-              <div className="w-14 h-20 md:w-20 md:h-28 bg-[#1a120b] rounded-md md:rounded-lg border-2 border-[#3e2723] card-back-pattern shadow-heavy relative">
-                   <div className="absolute inset-0 flex items-center justify-center">
-                      <img src="https://www.transparenttextures.com/patterns/wood-pattern.png" className="opacity-10 w-full h-full object-cover" />
-                   </div>
-              </div>
-              <span className="text-[#5d4037] font-sans font-bold text-[10px] uppercase tracking-widest bg-[#0f0a06]/80 px-2 py-0.5 rounded-full border border-[#3e2723] group-hover:text-[#8a6e38] group-hover:border-[#8a6e38] transition-colors">{activePlayer.deck.length} Deck</span>
-          </div>
-
-          {/* NEW: Discard Pile (Bottom Right) */}
-          <div 
-            onClick={() => setIsDiscardOpen(true)}
-            className="absolute right-4 md:right-10 bottom-6 md:bottom-10 flex flex-col items-center gap-1 group cursor-pointer hover:scale-105 transition-transform z-50"
-          >
-              <div className="w-14 h-20 md:w-20 md:h-28 bg-[#1a120b] rounded-md md:rounded-lg border-2 border-[#3e2723] shadow-heavy relative flex items-center justify-center overflow-hidden">
-                   {activePlayer.discard.length > 0 ? (
-                      // Show Top Card of Discard
-                      <div className="w-full h-full relative">
-                         <img src={activePlayer.discard[activePlayer.discard.length - 1].image} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                         <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
-                      </div>
-                   ) : (
-                      // Empty Slot
-                      <div className="text-[#3e2723] group-hover:text-[#5d4037]"><Layers size={24} /></div>
-                   )}
-              </div>
-              <span className="text-[#5d4037] font-sans font-bold text-[10px] uppercase tracking-widest bg-[#0f0a06]/80 px-2 py-0.5 rounded-full border border-[#3e2723] group-hover:text-[#8a6e38] group-hover:border-[#8a6e38] transition-colors">{activePlayer.discard.length} Discard</span>
-          </div>
-
-          {/* Cards Container */}
-          <div className="flex justify-center items-end px-4 md:px-20 min-h-[140px] md:min-h-[200px] overflow-visible">
-              <div className="flex -space-x-6 md:-space-x-12 hover:space-x-1 md:hover:space-x-2 transition-all duration-300 pb-2 md:pb-4 max-w-full overflow-x-auto scrollbar-none px-10 md:px-20 py-4">
-                  {/* Private Hand Logic */}
-                  {(gameMode === 'LOCAL' || isMyTurn) ? (
-                      activePlayer?.hand.map((card, index) => (
-                        <div 
-                          key={`${index}-${card.id}`} 
-                          className={`
-                             relative transform transition-all duration-200 
-                             ${selectedHandIndices.includes(index) ? '-translate-y-8 md:-translate-y-12 z-50 scale-105' : 'hover:-translate-y-8 md:hover:-translate-y-12 hover:scale-110 hover:z-40 hover:rotate-2'}
-                             ${!isInteracting && processingRef.current ? 'cursor-wait' : ''}
-                             ${turnPhase === 'BUY' && (card.type === CardType.ACTION || card.type === CardType.REACTION) ? 'opacity-50 grayscale' : ''} 
-                          `}
-                          style={{ transitionDelay: `${index * 30}ms` }}
-                        >
-                            <CardDisplay 
-                              card={card} 
-                              onClick={() => handleHandCardClick(index)} 
-                              onMouseEnter={() => setHoveredCard(card)}
-                              onMouseLeave={() => setHoveredCard(null)}
-                              disabled={isInteracting && currentInteraction?.type !== 'HAND_SELECTION' && currentInteraction?.type !== 'CUSTOM_SELECTION'}
-                              selected={selectedHandIndices.includes(index)}
-                              shake={shakingCardId === `${index}-${card.id}`}
-                            />
-                            {/* NEW: Play Confirmation Overlay */}
-                            {confirmingCardIndex === index && (
-                                <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none animate-in zoom-in-50">
-                                    <div className="bg-[#1a120b]/90 border border-[#e6c888] px-3 py-1 rounded-full text-[#e6c888] font-serif font-bold uppercase tracking-widest text-[10px] md:text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(230,200,136,0.6)]">
-                                        <PlayCircle size={14} className="animate-pulse" /> Play?
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                      ))
-                  ) : (
-                      /* Opponent Waiting View */
-                      <div className="flex items-center justify-center w-full h-32 md:h-48 text-center animate-pulse">
-                         <div className="bg-[#1a120b]/60 border border-[#c5a059]/30 p-4 md:p-6 rounded-lg backdrop-blur-md shadow-heavy flex items-center gap-3 md:gap-4">
-                            <Hourglass className="text-[#c5a059] animate-spin-slow" size={24} />
-                            <div>
-                                <h3 className="text-[#e6c888] font-serif font-bold text-lg md:text-xl uppercase tracking-widest">Opponent is Thinking</h3>
-                                <p className="text-[#8a6e38] text-[10px] md:text-xs font-sans font-bold">Waiting for {activePlayer.name}...</p>
-                            </div>
+           {/* BOTTOM: HAND */}
+           <div className="h-40 md:h-56 bg-[#0f0a06] border-t border-[#3e2723] relative flex items-end justify-center pb-4 z-30">
+                <div className="flex items-end justify-center -space-x-8 md:-space-x-12 hover:space-x-1 transition-all duration-300 px-4 pb-2 md:pb-6 overflow-x-visible">
+                     {currentPlayer.hand.map((card, i) => (
+                         <div key={i} className={`transition-transform duration-200 hover:-translate-y-8 z-10 ${selectedHandIndices.includes(i) ? '-translate-y-12 z-20 ring-2 ring-[#e6c888] rounded-lg' : ''}`}>
+                             <CardDisplay 
+                                 card={card} 
+                                 onClick={() => handleHandCardClick(i)} 
+                                 disabled={!isMyTurn && !isInteracting}
+                                 selected={selectedHandIndices.includes(i)}
+                                 shake={shakingCardId === `${i}-${card.id}`}
+                             />
                          </div>
-                      </div>
-                  )}
+                     ))}
+                </div>
+                
+                {/* Action Buttons */}
+                <div className="absolute right-4 bottom-4 flex flex-col gap-2">
+                     {isMyTurn && !isInteracting && (
+                         <>
+                            <button onClick={handlePlayAllTreasures} className="bg-[#e6c888] hover:bg-[#ffd700] text-black font-bold p-3 rounded-full shadow-lg" title="Play Treasures">
+                                <Coins />
+                            </button>
+                            <button onClick={handleEndTurn} className="bg-[#5e1b1b] hover:bg-[#7f1d1d] text-white font-bold p-3 rounded-full shadow-lg" title="End Turn">
+                                <SkipForward />
+                            </button>
+                         </>
+                     )}
+                     {isInteracting && (
+                         <button onClick={handleConfirmInteraction} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3 rounded-lg shadow-lg animate-pulse uppercase tracking-widest">
+                             {currentInteraction?.confirmLabel || 'Confirm'}
+                         </button>
+                     )}
+                </div>
+           </div>
 
-                  {/* Empty Hand State */}
-                  {(gameMode === 'LOCAL' || isMyTurn) && activePlayer?.hand.length === 0 && (
-                      <div className="text-[#5d4037] font-serif italic text-sm md:text-xl opacity-50 flex items-center gap-2">
-                          <span>Empty Hand</span>
-                      </div>
-                  )}
-              </div>
-          </div>
-        </div>
+           {/* LOG OVERLAY */}
+           {isLogOpen && (
+               <div className="absolute right-0 top-16 bottom-40 w-80 bg-black/90 border-l border-[#3e2723] p-4 overflow-y-auto z-40 font-mono text-xs text-stone-300">
+                   {log.map((entry, i) => <div key={i} className="mb-1 border-b border-white/5 pb-1">{entry}</div>)}
+                   <div ref={logEndRef} />
+               </div>
+           )}
+
+           {/* CARD PREVIEW / BUY OVERLAY */}
+           {viewingSupplyCard && (
+               <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4" onClick={() => setViewingSupplyCard(null)}>
+                   <div className="flex flex-col items-center gap-6 animate-in zoom-in-90" onClick={e => e.stopPropagation()}>
+                       <CardDisplay card={viewingSupplyCard} />
+                       {isMyTurn && turnPhase !== 'ACTION' && (
+                           <button 
+                              onClick={confirmBuyCard}
+                              disabled={currentPlayer.gold < viewingSupplyCard.cost || currentPlayer.buys < 1 || supply[viewingSupplyCard.id] === 0}
+                              className="bg-[#e6c888] disabled:opacity-50 disabled:grayscale text-black font-bold px-8 py-3 rounded uppercase tracking-widest shadow-heavy hover:scale-105 transition-transform"
+                           >
+                              Buy ({viewingSupplyCard.cost})
+                           </button>
+                       )}
+                   </div>
+               </div>
+           )}
+           
+           {/* INTERACTION MESSAGE */}
+           {isInteracting && (
+               <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-black/80 border border-[#e6c888] px-8 py-4 rounded-lg z-50 text-center pointer-events-none">
+                   <h3 className="text-[#e6c888] font-serif text-xl">{currentInteraction?.source}</h3>
+                   <p className="text-white">{currentInteraction?.filterMessage || 'Make your selection'}</p>
+               </div>
+           )}
       </div>
-    </div>
   );
 }
