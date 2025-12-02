@@ -35,7 +35,7 @@ const shuffle = (array: CardDef[]): CardDef[] => {
 
 // --- Audio Configuration ---
 const SOUNDS = {
-  music: "./menu_music.mp3", 
+  music: "/menu_music.mp3", 
   fireplace: "https://upload.wikimedia.org/wikipedia/commons/transcoded/d/d4/Enclosed_fireplace_sounds.ogg/Enclosed_fireplace_sounds.ogg.mp3", 
   flip: "https://upload.wikimedia.org/wikipedia/commons/transcoded/9/9b/Card_flip.ogg/Card_flip.ogg.mp3", 
   shuffle: "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/22/Card_shuffle.ogg/Card_shuffle.ogg.mp3",
@@ -2112,4 +2112,216 @@ export default function App() {
 
                   {/* Victory Group */}
                   <div className="flex flex-col gap-2 items-center">
-                      <div className="text-[10px] text-[#15803d] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#15803d]/3
+                      <div className="text-[10px] text-[#15803d] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#15803d]/30 pb-0.5 mb-1 px-2">
+                          <Crown size={10}/> Victory
+                      </div>
+                      <div className="flex gap-2">
+                          {['estate', 'duchy', 'province'].map(id => CARDS[id]).map(card => (
+                              <div key={card.id} className="relative group">
+                                  <CardDisplay card={card} small count={supply[card.id]} onClick={() => handleSupplyCardClick(card.id)} disabled={(supply[card.id] || 0) < 1} />
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+
+                  {/* Curses Group */}
+                  <div className="flex flex-col gap-2 items-center">
+                      <div className="text-[10px] text-[#581c87] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#581c87]/30 pb-0.5 mb-1 px-2">
+                          <Skull size={10}/> Curses
+                      </div>
+                      <div className="flex gap-2">
+                          {['curse'].map(id => CARDS[id]).map(card => (
+                              <div key={card.id} className="relative group">
+                                  <CardDisplay card={card} small count={supply[card.id]} onClick={() => handleSupplyCardClick(card.id)} disabled={(supply[card.id] || 0) < 1} />
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              </div>
+
+              {/* Bottom Row: Kingdom Cards */}
+              <div className="flex flex-col gap-2 items-center">
+                 <div className="text-[10px] text-[#c5a059] font-serif font-bold uppercase tracking-widest flex items-center gap-1 border-b border-[#c5a059]/30 pb-0.5 mb-1 px-4">
+                    <Sword size={10}/> Kingdom
+                 </div>
+                 <div className="grid grid-cols-5 gap-2 md:gap-4 justify-items-center">
+                    {Object.keys(supply)
+                        .filter(id => !BASIC_CARDS[id])
+                        .sort((a, b) => CARDS[a].cost - CARDS[b].cost)
+                        .map(id => (
+                            <div key={id} className="relative group">
+                                <CardDisplay 
+                                  card={CARDS[id]} 
+                                  small 
+                                  count={supply[id]} 
+                                  onClick={() => handleSupplyCardClick(id)} 
+                                  disabled={supply[id] < 1}
+                                />
+                            </div>
+                        ))}
+                 </div>
+              </div>
+
+          </div>
+          
+          {/* Play Area */}
+          <div className="min-h-[160px] md:min-h-[220px] flex items-center justify-center py-4 relative group">
+              {/* Play Area Indicator */}
+              {activePlayer?.playArea.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
+                   <div className="w-64 h-40 border-2 border-dashed border-[#8a6e38] rounded-xl flex items-center justify-center">
+                      <span className="text-[#8a6e38] font-serif uppercase tracking-widest text-xs font-bold">Play Area</span>
+                   </div>
+                </div>
+              )}
+              
+              <div className="flex -space-x-12 md:-space-x-16 hover:space-x-2 transition-all duration-300 p-4">
+                  {activePlayer?.playArea.map((card, idx) => (
+                      <div key={idx} className="relative transform hover:scale-110 hover:-translate-y-6 transition-all duration-300 z-10 hover:z-50 drop-shadow-2xl origin-bottom animate-play">
+                          <CardDisplay card={card} />
+                      </div>
+                  ))}
+              </div>
+          </div>
+        </div>
+
+        {/* Hand Section - Fixed to Bottom */}
+        <div className="bg-gradient-to-t from-black via-[#0f0a06] to-transparent pt-12 md:pt-20 pb-4 md:pb-8 relative z-40 shrink-0">
+          
+          {/* Controls Bar */}
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 md:gap-6 z-50 w-full justify-center pointer-events-none">
+             
+             {/* Phase Indicator (Pointer Events Auto to allow clicks if needed) */}
+             {!isInteracting && (
+                <div className="pointer-events-auto px-4 md:px-6 py-2 bg-[#1a120b]/80 border border-[#3e2723] rounded-full text-[#c5a059] font-sans text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold shadow-heavy backdrop-blur-md flex items-center gap-2">
+                    {currentPhaseLabel}
+                    {turnPhase === 'ACTION' && currentPlayer.actions === 0 && (
+                        <span className="text-red-500 animate-pulse text-[8px]">(0 Actions)</span>
+                    )}
+                </div>
+             )}
+
+             {/* Skip to Buy Phase Button (Only visible in Action Phase) */}
+             {!isInteracting && turnPhase === 'ACTION' && (gameMode === 'LOCAL' || isMyTurn) && (
+                 <button 
+                    onClick={handleEnterBuyPhase} 
+                    className="pointer-events-auto h-10 md:h-12 px-4 md:px-6 bg-[#2c1e16] hover:bg-[#3e2723] text-[#e6c888] border border-[#8a6e38] hover:border-[#ffd700] rounded-full font-serif font-bold uppercase tracking-widest text-[10px] md:text-xs shadow-[0_0_15px_rgba(255,215,0,0.2)] transition-all flex items-center gap-2 active:scale-95"
+                 >
+                    <SkipForward size={14} /> Enter Buy Phase
+                 </button>
+             )}
+
+             {/* Play All Treasures (Only visible in Buy Phase or if Action phase has treasures but we auto-switch on play) */}
+             {activePlayer && activePlayer.hand.some(c => c.type === CardType.TREASURE) && !isInteracting && (gameMode === 'LOCAL' || isMyTurn) && (
+                 <button 
+                    onClick={handlePlayAllTreasures} 
+                    className="pointer-events-auto h-10 md:h-12 px-4 md:px-6 bg-[#2c1e16] hover:bg-[#3e2723] text-[#ffd700] border border-[#8a6e38] hover:border-[#ffd700] rounded-full font-serif font-bold uppercase tracking-widest text-[10px] md:text-xs shadow-[0_0_15px_rgba(255,215,0,0.2)] transition-all flex items-center gap-2 active:scale-95"
+                 >
+                    <Coins size={14} /> Play Treasures
+                 </button>
+             )}
+
+             {/* End Turn Button */}
+             {!isInteracting && (gameMode === 'LOCAL' || isMyTurn) && (
+               <button 
+                  onClick={handleEndTurn} 
+                  disabled={isEndingTurn}
+                  className="pointer-events-auto h-10 md:h-12 px-6 md:px-10 bg-[#5e1b1b] hover:bg-[#7f1d1d] text-white border border-[#991b1b] hover:border-red-400 rounded-full font-serif font-bold uppercase tracking-[0.2em] text-[10px] md:text-xs shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all flex items-center gap-2 md:gap-3 group active:scale-95 disabled:grayscale"
+               >
+                  {isEndingTurn ? <Loader className="animate-spin" size={14}/> : <div className="w-2 h-2 bg-white rounded-full animate-pulse group-hover:scale-150 transition-transform"></div>}
+                  End Turn
+               </button>
+             )}
+          </div>
+          
+          {/* Deck Count (Bottom Left) */}
+          <div className="absolute left-4 md:left-10 bottom-6 md:bottom-10 flex flex-col items-center gap-1 group cursor-pointer hover:scale-105 transition-transform z-50">
+              <div className="w-14 h-20 md:w-20 md:h-28 bg-[#1a120b] rounded-md md:rounded-lg border-2 border-[#3e2723] card-back-pattern shadow-heavy relative">
+                   <div className="absolute inset-0 flex items-center justify-center">
+                      <img src="https://www.transparenttextures.com/patterns/wood-pattern.png" className="opacity-10 w-full h-full object-cover" />
+                   </div>
+              </div>
+              <span className="text-[#5d4037] font-sans font-bold text-[10px] uppercase tracking-widest bg-[#0f0a06]/80 px-2 py-0.5 rounded-full border border-[#3e2723] group-hover:text-[#8a6e38] group-hover:border-[#8a6e38] transition-colors">{activePlayer.deck.length} Deck</span>
+          </div>
+
+          {/* NEW: Discard Pile (Bottom Right) */}
+          <div 
+            onClick={() => setIsDiscardOpen(true)}
+            className="absolute right-4 md:right-10 bottom-6 md:bottom-10 flex flex-col items-center gap-1 group cursor-pointer hover:scale-105 transition-transform z-50"
+          >
+              <div className="w-14 h-20 md:w-20 md:h-28 bg-[#1a120b] rounded-md md:rounded-lg border-2 border-[#3e2723] shadow-heavy relative flex items-center justify-center overflow-hidden">
+                   {activePlayer.discard.length > 0 ? (
+                      // Show Top Card of Discard
+                      <div className="w-full h-full relative">
+                         <img src={activePlayer.discard[activePlayer.discard.length - 1].image} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                         <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors"></div>
+                      </div>
+                   ) : (
+                      // Empty Slot
+                      <div className="text-[#3e2723] group-hover:text-[#5d4037]"><Layers size={24} /></div>
+                   )}
+              </div>
+              <span className="text-[#5d4037] font-sans font-bold text-[10px] uppercase tracking-widest bg-[#0f0a06]/80 px-2 py-0.5 rounded-full border border-[#3e2723] group-hover:text-[#8a6e38] group-hover:border-[#8a6e38] transition-colors">{activePlayer.discard.length} Discard</span>
+          </div>
+
+          {/* Cards Container */}
+          <div className="flex justify-center items-end px-4 md:px-20 min-h-[140px] md:min-h-[200px] overflow-visible">
+              <div className="flex -space-x-6 md:-space-x-12 hover:space-x-1 md:hover:space-x-2 transition-all duration-300 pb-2 md:pb-4 max-w-full overflow-x-auto scrollbar-none px-10 md:px-20 py-4">
+                  {/* Private Hand Logic */}
+                  {(gameMode === 'LOCAL' || isMyTurn) ? (
+                      activePlayer?.hand.map((card, index) => (
+                        <div 
+                          key={`${index}-${card.id}`} 
+                          className={`
+                             relative transform transition-all duration-200 
+                             ${selectedHandIndices.includes(index) ? '-translate-y-8 md:-translate-y-12 z-50 scale-105' : 'hover:-translate-y-8 md:hover:-translate-y-12 hover:scale-110 hover:z-40 hover:rotate-2'}
+                             ${!isInteracting && processingRef.current ? 'cursor-wait' : ''}
+                             ${turnPhase === 'BUY' && (card.type === CardType.ACTION || card.type === CardType.REACTION) ? 'opacity-50 grayscale' : ''} 
+                          `}
+                          style={{ transitionDelay: `${index * 30}ms` }}
+                        >
+                            <CardDisplay 
+                              card={card} 
+                              onClick={() => handleHandCardClick(index)} 
+                              onMouseEnter={() => setHoveredCard(card)}
+                              onMouseLeave={() => setHoveredCard(null)}
+                              disabled={isInteracting && currentInteraction?.type !== 'HAND_SELECTION' && currentInteraction?.type !== 'CUSTOM_SELECTION'}
+                              selected={selectedHandIndices.includes(index)}
+                              shake={shakingCardId === `${index}-${card.id}`}
+                            />
+                            {/* NEW: Play Confirmation Overlay */}
+                            {confirmingCardIndex === index && (
+                                <div className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none animate-in zoom-in-50">
+                                    <div className="bg-[#1a120b]/90 border border-[#e6c888] px-3 py-1 rounded-full text-[#e6c888] font-serif font-bold uppercase tracking-widest text-[10px] md:text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(230,200,136,0.6)]">
+                                        <PlayCircle size={14} className="animate-pulse" /> Play?
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                      ))
+                  ) : (
+                      /* Opponent Waiting View */
+                      <div className="flex items-center justify-center w-full h-32 md:h-48 text-center animate-pulse">
+                         <div className="bg-[#1a120b]/60 border border-[#c5a059]/30 p-4 md:p-6 rounded-lg backdrop-blur-md shadow-heavy flex items-center gap-3 md:gap-4">
+                            <Hourglass className="text-[#c5a059] animate-spin-slow" size={24} />
+                            <div>
+                                <h3 className="text-[#e6c888] font-serif font-bold text-lg md:text-xl uppercase tracking-widest">Opponent is Thinking</h3>
+                                <p className="text-[#8a6e38] text-[10px] md:text-xs font-sans font-bold">Waiting for {activePlayer.name}...</p>
+                            </div>
+                         </div>
+                      </div>
+                  )}
+
+                  {/* Empty Hand State */}
+                  {(gameMode === 'LOCAL' || isMyTurn) && activePlayer?.hand.length === 0 && (
+                      <div className="text-[#5d4037] font-serif italic text-sm md:text-xl opacity-50 flex items-center gap-2">
+                          <span>Empty Hand</span>
+                      </div>
+                  )}
+              </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
