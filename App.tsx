@@ -1611,13 +1611,6 @@ export default function App() {
 
            <div className="w-full max-w-4xl flex flex-col items-center justify-end relative z-20 pb-12 lg:pb-20 animate-in fade-in zoom-in duration-1000 px-6">
                
-               {/* Subtitle floating above menu - Replacing the big title since it's in the art */}
-               <div className="mb-8 text-center bg-black/60 backdrop-blur-md p-4 rounded-xl border border-[#c5a059]/30 shadow-heavy">
-                   <p className="text-[#e6c888] font-serif text-lg md:text-xl tracking-[0.4em] uppercase font-bold text-emboss drop-shadow-lg">
-                       A Deck-Building Conquest
-                   </p>
-               </div>
-              
                {!showOnlineMenu ? (
                   <div className="w-full max-w-2xl flex flex-col gap-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
