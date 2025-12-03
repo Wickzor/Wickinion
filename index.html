@@ -159,10 +159,11 @@
         width: 100vw;
       }
 
-      /* Mobile Adjustment: Show full image (contain) to prevent clipping title */
+      /* Mobile Adjustment: Use dedicated portrait image (startmenu_mobile.png) */
       @media (max-width: 768px) {
         .bg-menu {
-          background-size: contain;
+          background-image: url('./startmenu_mobile.png');
+          background-size: cover;
           background-position: center;
         }
       }
